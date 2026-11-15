@@ -12,6 +12,7 @@
 #include "gpu/rhi.h"
 #include "gpu/rhi_ring.h"
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -251,10 +252,13 @@ namespace gpu::rhi
                 return shader;
             }
 
-            // The key with its padding zeroed: it is compared and hashed as bytes, and the renderer's
-            // copies of it (by value) leave the padding after the last field undefined, which made
-            // every draw a new pipeline.
-            static DrawPipelineKey Normalized(const DrawPipelineKey& in)
+            // The key as bytes, its padding zeroed: it is compared and hashed as bytes. It stays bytes
+            // (KeyBytes) from here on: a copy of the struct (the renderer's by value, the cache's own
+            // m_lastKey = key or CachedPipeline{ key }) copies the fields but not the padding, so
+            // keys kept as structs compared unequal to themselves (made every draw a new pipeline,
+            // then ~3 of 4 pipelines duplicates of one already made).
+            using KeyBytes = std::array<uint8_t, sizeof(DrawPipelineKey)>;
+            static KeyBytes Normalized(const DrawPipelineKey& in)
             {
                 DrawPipelineKey k;
                 memset(&k, 0, sizeof(k));
@@ -280,34 +284,47 @@ namespace gpu::rhi
                 k.depthClip = in.depthClip;
                 k.stripCut = in.stripCut;
                 k.keepFormats = in.keepFormats;
-                return k;
+                KeyBytes bytes;
+                memcpy(bytes.data(), &k, sizeof(k));
+                return bytes;
             }
 
             Pipeline* GetDrawPipeline(const DrawPipelineKey& rendererKey, bool, bool* deferred) override
             {
                 if (deferred)
                     *deferred = false;
-                const DrawPipelineKey key = Normalized(rendererKey);
+                const KeyBytes bytes = Normalized(rendererKey);
                 std::lock_guard lock(m_pipelineMutex);
                 // Consecutive draws mostly share their pipeline.
-                if (m_lastPipeline && !memcmp(&m_lastKey, &key, sizeof(key)))
+                if (m_lastPipeline && m_lastKey == bytes)
                     return m_lastPipeline;
-                uint64_t hash = HashBytes(&key, sizeof(key));
+                uint64_t hash = HashBytes(bytes.data(), bytes.size());
                 auto range = m_drawPipelines.equal_range(hash);
                 for (auto it = range.first; it != range.second; ++it)
                 {
-                    if (!memcmp(&it->second.key, &key, sizeof(key)))
+                    if (it->second.key == bytes)
                     {
-                        m_lastKey = key;
+                        m_lastKey = bytes;
                         m_lastPipeline = it->second.pipeline;
                         return m_lastPipeline;
                     }
                 }
                 m_pipelineMisses++;
+                DrawPipelineKey key;
+                memcpy(&key, bytes.data(), sizeof(key));
                 auto* pipeline = new WgPipeline;
                 pipeline->id = NextId();
+                RecordPipeline(pipeline->id, key);
+                m_drawPipelines.emplace(hash, CachedPipeline{ bytes, pipeline });
+                m_lastKey = bytes;
+                m_lastPipeline = pipeline;
+                return pipeline;
+            }
+
+            void RecordPipeline(uint32_t id, const DrawPipelineKey& key)
+            {
                 WgDrawPipeline r{};
-                r.id = pipeline->id;
+                r.id = id;
                 r.vs = Id(key.vs);
                 r.ps = Id(key.ps);
                 r.gs = Id(key.gs);
@@ -326,10 +343,6 @@ namespace gpu::rhi
                 r.stripCut = key.stripCut;
                 r.keepFormats = key.keepFormats;
                 Record(WG_CREATE_DRAW_PIPELINE, &r, sizeof(r));
-                m_drawPipelines.emplace(hash, CachedPipeline{ key, pipeline });
-                m_lastKey = key;
-                m_lastPipeline = pipeline;
-                return pipeline;
             }
 
             void PrecompileProgress(uint32_t& done, uint32_t& total) override { done = total = 0; }
@@ -508,11 +521,11 @@ namespace gpu::rhi
             std::mutex m_pipelineMutex;
             struct CachedPipeline
             {
-                DrawPipelineKey key;
+                KeyBytes key;
                 WgPipeline* pipeline;
             };
             std::unordered_multimap<uint64_t, CachedPipeline> m_drawPipelines;  // by HashBytes of the key
-            DrawPipelineKey m_lastKey{};
+            KeyBytes m_lastKey{};
             WgPipeline* m_lastPipeline = nullptr;
             uint64_t m_pipelineMisses = 0;
             // Time the command processor spent waiting for the page (ring room), between reports.

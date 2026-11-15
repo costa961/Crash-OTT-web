@@ -354,7 +354,10 @@ export class Executor {
   /** ?offscreen=1: the back buffer to the 2D canvas, at most twice a second. */
   private showOffscreen() {
     const o = this.offscreen;
-    if (!o || o.busy || performance.now() - o.last < 500) return;
+    if (!o || performance.now() - o.last < 500) return;
+    // A readback whose mapAsync hasn't settled after 1.5 s is given up: on headless SwiftShader the
+    // device's promises can stop settling while the queue never goes idle (a frozen picture otherwise).
+    if (o.busy && performance.now() - o.last < 1500) return;
     o.busy = true; o.last = performance.now();
     const w = o.canvas.width, h = o.canvas.height, bpr = Math.ceil(w * 4 / 256) * 256;
     const buf = this.dev.createBuffer({ size: bpr * h, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });

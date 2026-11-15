@@ -68,7 +68,7 @@ On the start page:
 - **Controls**: the keyboard bindings, one key per pad input (click one, press the new key; Reset for the
   defaults below; Enter is always A too), and on the Gamepad tab which gamepad button is which pad input
   (click one, press the button).
-- **Graphics**: the internal resolution (720p, the original, up to 4K) and aspect ratio (the screen's, or
+- **Graphics**: a preset (Original, Low for integrated GPUs, Medium, High) or each option by hand: the internal resolution (720p, the original, up to 4K) and aspect ratio (the screen's, or
   16:9, 16:10, 21:9, 32:9, 4:3: wider shows more to the sides), the 60 FPS mode, anti-aliasing (off, FXAA, SMAA)
   and crashott-pc's motion blur, depth of field and shadow
   softness (0-200 %, 100 % = the game's own look); its lighting remaster: ambient occlusion (off, low, high),

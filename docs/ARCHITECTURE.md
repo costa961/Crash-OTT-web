@@ -115,7 +115,9 @@ at its end, which here belongs to the guest.
    No geometry shaders: the renderer's own rectangle-list expansion (its Mali path). Not done yet: depth /
    stencil views sampled by draws, the overlay, viewports outside their target.
    Headless check: `tools/shot.mjs` in GTA SA web's browser image, server and Chrome in one container
-   (`?offscreen=1`: SwiftShader can't allocate a canvas swap chain there, frames are read back to a 2D canvas).
+   (`?offscreen=1`: SwiftShader can't allocate a canvas swap chain there, frames are read back to a 2D canvas; a readback
+   whose `mapAsync` doesn't settle within 1.5 s is given up, since there the device's promises can stop settling while
+   the queue never idles, which froze the picture on one frame).
 5. **Audio, input, saves, data** — done.
    - Audio: crashott-pc's XAudio / XMA imports, XMA decoder and mixer. The decoder's FFmpeg (WMA Pro only) is
      built from source for wasm (`tools/ffmpeg_wasm.sh`) and linked statically (`runtime/ffmpeg_wasm.cpp`).
@@ -149,7 +151,11 @@ at its end, which here belongs to the guest.
 6. **Performance** — 30 fps in game (the original rate); 60 with `CRASHOTT_FPS=60` (the start page's 60 FPS mode:
    crashott-pc's `gpu::SetFrameLimit`, paced in VdSwap). The fix that mattered: the WebGPU device's pipeline cache
    hashed `DrawPipelineKey` with its padding, which the renderer's copies leave undefined, so every draw made a
-   new pipeline; keys are normalized now (`Normalized` in `rhi_webgpu.cpp`).
+   new pipeline; keys are normalized now (`Normalized` in `rhi_webgpu.cpp`). They are also kept as bytes
+   (`KeyBytes`): the cache's own copies of the key struct (`m_lastKey = key`, `CachedPipeline{ key }`) copied the
+   fields and not the padding, so ~3 of 4 pipelines were duplicates of one already made (7,600 made by the menus
+   and the first loading screen, 17 now), each a pipeline the browser compiles while the game runs (hitches), and
+   the lookups cost the command processor ~6 ms per frame (0.05 ms now).
 
 ## Known gaps
 

@@ -357,11 +357,26 @@ function graphicsEnv(g: Graphics): Record<string, string> {
     CRASHOTT_FPS: opt60.checked ? '60' : '30',
   };
 }
+// Presets: everything but the aspect ratio and the 60 FPS mode (the screen's and the player's to choose).
+// Low: integrated GPUs (720p, cheap effects); Medium: 720p with the lighting remaster's cheaper parts;
+// High: 1080p with all of it. Any change by hand makes it "Custom".
+const PRESETS: Record<string, Omit<Graphics, 'aspect'>> = {
+  original: { res: '720', aa: 'off', mb: 100, dof: 100, sh: 100, ssao: 'off', gi: false, giI: 100, contact: false, soft: false },
+  low: { res: '720', aa: 'fxaa', mb: 100, dof: 100, sh: 100, ssao: 'off', gi: false, giI: 100, contact: false, soft: true },
+  medium: { res: '720', aa: 'smaa', mb: 100, dof: 100, sh: 100, ssao: 'low', gi: false, giI: 100, contact: true, soft: true },
+  high: { res: '1080', aa: 'smaa', mb: 100, dof: 100, sh: 100, ssao: 'high', gi: true, giI: 100, contact: true, soft: true },
+};
+function presetOf(g: Graphics): string {
+  for (const [name, p] of Object.entries(PRESETS))
+    if ((Object.keys(p) as (keyof typeof p)[]).every(k => p[k] === g[k])) return name;
+  return 'custom';
+}
 function loadGraphics(): Graphics {
   try { return { ...GRAPHICS_DEFAULT, ...JSON.parse(localStorage.getItem('crashott-graphics') ?? '{}') as Partial<Graphics> }; }
   catch { return { ...GRAPHICS_DEFAULT }; }
 }
 const graphicsDlg = document.getElementById('graphicsDlg') as HTMLDialogElement;
+const presetSel = document.getElementById('optPreset') as HTMLSelectElement;
 const gfxEls = {
   res: document.getElementById('optRes') as HTMLSelectElement,
   aspect: document.getElementById('optAspect') as HTMLSelectElement,
@@ -385,6 +400,7 @@ function showGraphics(g: Graphics) {
   for (const k of PERCENTS) { gfxEls[k][0].value = String(g[k]); gfxEls[k][1].value = `${g[k]}%`; }
   for (const k of SWITCHES) gfxEls[k].checked = g[k];
   gfxEls.giI[0].disabled = !g.gi;
+  presetSel.value = presetOf(g);
 }
 function storeGraphics() {
   const g: Graphics = {
@@ -400,6 +416,12 @@ let live = false;
 function sendLive() {
   if (live && gameInput) gameInput.sendOptions(graphicsEnv(loadGraphics()));
 }
+presetSel.onchange = () => {
+  const p = PRESETS[presetSel.value];
+  if (!p) return;
+  showGraphics({ ...p, aspect: gfxEls.aspect.value });
+  storeGraphics();
+};
 gfxEls.res.onchange = gfxEls.aspect.onchange = gfxEls.aa.onchange = gfxEls.ssao.onchange = storeGraphics;
 for (const k of PERCENTS) gfxEls[k][0].oninput = storeGraphics;
 for (const k of SWITCHES) gfxEls[k].onchange = storeGraphics;
