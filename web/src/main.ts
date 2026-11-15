@@ -111,6 +111,7 @@ async function start(audio: AudioContext) {
   const env: Record<string, string> = {};
   for (const kv of q.getAll('env')) { const [k, ...v] = kv.split('='); env[k] = v.join('='); }
   env.CRASHOTT_LANGUAGE ??= languageSel.value;
+  if (optSkip.checked) env.CRASH_SKIP_INTROS ??= '1';
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
@@ -169,11 +170,29 @@ async function start(audio: AudioContext) {
   Atomics.notify(ctl, C_POOL);
 }
 
-// ---- the FPS counter (the start page's "Show FPS", remembered in this browser) ----
-const optFps = document.getElementById('optFps') as HTMLInputElement;
+// ---- the start page's switches, remembered in this browser ----
+function rememberedSwitch(id: string, key: string): HTMLInputElement {
+  const el = document.getElementById(id) as HTMLInputElement;
+  try { el.checked = localStorage.getItem(key) === '1'; } catch { /* no storage */ }
+  el.onchange = () => { try { localStorage.setItem(key, el.checked ? '1' : '0'); } catch { /* no storage */ } };
+  return el;
+}
+// no logo videos, no title screen: straight to the main menu (crashott-pc's settings/direct_boot.cpp)
+const optSkip = rememberedSwitch('optSkip', 'crashott-skip-intros');
+
+// ---- full screen: F, or a double-click on the game ----
+function toggleFullscreen() {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void stageEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+}
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyF' && !e.repeat && !stageEl.hidden) { e.preventDefault(); toggleFullscreen(); }
+});
+stageEl.addEventListener('dblclick', toggleFullscreen);
+
+// ---- the FPS counter (the start page's "FPS counter") ----
+const optFps = rememberedSwitch('optFps', 'crashott-fps');
 const fpsEl = document.getElementById('fps') as HTMLDivElement;
-try { optFps.checked = localStorage.getItem('crashott-fps') === '1'; } catch { /* no storage */ }
-optFps.onchange = () => { try { localStorage.setItem('crashott-fps', optFps.checked ? '1' : '0'); } catch { /* no storage */ } };
 
 /** Frames the game presented per second, twice a second (frames(): presented so far). */
 function startFps(frames: () => number) {

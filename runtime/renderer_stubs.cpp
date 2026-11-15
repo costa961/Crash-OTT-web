@@ -12,6 +12,7 @@
 #include "online/mp_menu.h"
 #include "settings/challenge_counters.h"
 #include "settings/direct_boot.h"
+#include "settings/pc_frontend.h"
 #include "settings/menu_mouse.h"
 #include "settings/prompt_icons.h"
 #include "settings/quit_game.h"
@@ -25,6 +26,7 @@
 #include "subtitles/subtitles.h"
 #include "platform/platform.h"
 
+#include <atomic>
 #include <cstdlib>
 
 // The PC build's screens over the game: not drawn.
@@ -47,6 +49,9 @@ namespace cutscenes
 {
     void Draw(uint32_t, uint32_t) {}
     bool VideoPlaying() { return false; }
+    // (settings/direct_boot.cpp) the cutscene skipper is not ported yet
+    void NoteFrontendNode(uint32_t) {}
+    void NoteMovie(int) {}
 }
 namespace touch_controls { void Draw(uint32_t, uint32_t) {} }
 namespace subtitles
@@ -57,12 +62,6 @@ namespace subtitles
     void OnFrames(uint32_t, uint64_t) {}
 }
 
-// settings/direct_boot.h: the --boot timeline (not used in the browser).
-namespace boot
-{
-    bool ParseAnchored(const char*&, double, Anchored&) { return false; }
-    int64_t Resolve(const Anchored&) { return 0; }
-}
 
 // Temporal upscalers (DLSS, FSR): none in WebGPU.
 namespace gpu::upscaler
@@ -112,13 +111,24 @@ namespace input
     void RecordMark(uint64_t) {}
     bool ConsumeShotRequest() { return false; }
     bool LastPress(Press&) { return false; }
-    void SetFrame(uint64_t) {}
+    // The frame number the renderer reports (settings/direct_boot.cpp reads it back for its events).
+    std::atomic<uint64_t> g_frame;
+    void SetFrame(uint64_t frame) { g_frame = frame; }
+    uint64_t Frame() { return g_frame; }
+    int64_t GameTick() { return int64_t(g_frame.load()); }
+    void NoteEvent(const char*) {}
 }
 namespace input::menu_mouse { void NoteFrontendPage() {} }
 
 // settings: the PC build's own UI texts, quit flow and HD remaster.
 namespace settings
 {
+    // settings/direct_boot.cpp: never restarted from a settings screen.
+    bool Restarted() { return false; }
+    // The PC frontend's EXIT GAME exit (settings/pc_frontend.cpp, not ported): direct_boot.cpp uses it
+    // only as the fingerprint of the Frontend.bfig whose node numbers it knows (86 there). The data is
+    // the retail disc's (tools/recomp.sh checks default.xex), so the same numbers: the expected value.
+    int QuitExit() { return 86; }
     UiLanguage UiLanguageOf(const std::string&) { return UiLanguage{}; }
     UiLanguage CurrentUiLanguage() { return UiLanguage{}; }
     const char* Tr(const UiText&, UiLanguage) { return ""; }

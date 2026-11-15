@@ -1,6 +1,7 @@
 // Stand-ins for the parts of crashott-pc's runtime the browser build doesn't have yet (renderer,
 // audio, input, window...). Each one goes away when its real port arrives (docs/ARCHITECTURE.md).
 #include "diagnostics.h"
+#include "platform/platform.h"
 #include "gpu/renderer.h"
 #include "kernel/input.h"
 
@@ -13,11 +14,18 @@
 #include <unordered_set>
 
 
-// gpu/window.h: no window; the page's visibility will drive Suspended later.
+// gpu/window.h: the page is the window. While it is hidden (another tab, minimized) the game is
+// held between two frames (gpu.cpp HoldWhileSuspended) and its vblanks stop, as the PC build does
+// with its window in the background.
+bool WebPageHidden();  // input_wasm.cpp
 namespace gpu::window
 {
-    bool Suspended() { return false; }
-    void WaitWhileSuspended() {}
+    bool Suspended() { return WebPageHidden(); }
+    void WaitWhileSuspended()
+    {
+        while (WebPageHidden())
+            plat::SleepMs(50);
+    }
 }
 
 // kernel/input.h: the input recorder (kernel/input_record.cpp): no recording, no replay.

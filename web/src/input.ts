@@ -17,7 +17,7 @@ const KEY_BUTTONS: Record<string, number> = { Space: B.A, Enter: B.A, NumpadEnte
   KeyU: B.LB, KeyO: B.RB, Escape: B.START, Tab: B.BACK, ArrowUp: B.UP, ArrowDown: B.DOWN, ArrowLeft: B.LEFT, ArrowRight: B.RIGHT,
   KeyZ: B.LS, KeyC: B.RS };
 
-const MAGIC = 0x504E4957, PAD_BYTES = 20, PADS_AT = 8;
+const MAGIC = 0x504E4957, PAD_BYTES = 20, PADS_AT = 8, HIDDEN_AT = PADS_AT + 4 * PAD_BYTES;
 
 export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: string) => void): () => void {
   const keys = new Set<string>();
@@ -25,6 +25,14 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
   const down = (e: KeyboardEvent) => { if (handled.has(e.code)) { keys.add(e.code); e.preventDefault(); } };
   const up = (e: KeyboardEvent) => { keys.delete(e.code); };
   const blur = () => keys.clear();
+  // the page hidden (another tab, minimized): the game holds between two frames (runtime/stubs.cpp)
+  const visibility = () => {
+    const i32 = new Int32Array(memory.buffer as unknown as ArrayBuffer, block, (HIDDEN_AT >> 2) + 1);
+    Atomics.store(i32, HIDDEN_AT >> 2, document.hidden ? 1 : 0);
+    if (document.hidden) keys.clear();
+    log(`[input] page ${document.hidden ? 'hidden: game paused' : 'visible: game running'}`);
+  };
+  document.addEventListener('visibilitychange', visibility);
   window.addEventListener('keydown', down);
   window.addEventListener('keyup', up);
   window.addEventListener('blur', blur);
@@ -93,5 +101,6 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
     window.removeEventListener('keydown', down);
     window.removeEventListener('keyup', up);
     window.removeEventListener('blur', blur);
+    document.removeEventListener('visibilitychange', visibility);
   };
 }

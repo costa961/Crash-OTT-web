@@ -5,8 +5,10 @@
 // values as crashott-pc's defaults (English, all regions).
 //
 // The block (WebInput, registered with the host through crashott.input_register): a sequence word
-// the page makes odd while it writes and even when done, then four WebPad entries.
+// the page makes odd while it writes and even when done, four WebPad entries, then the page's
+// visibility (nonzero while the page is hidden: the game is held, gpu/window.h Suspended).
 #include "kernel/kernel.h"
+#include "settings/direct_boot.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -33,6 +35,7 @@ namespace
         uint32_t magic;     // 'WINP'
         uint32_t sequence;  // odd while the page writes
         WebPad pads[4];
+        uint32_t hidden;    // the page is hidden (another tab, minimized)
     };
 
     // The game's languages: XConfig language and country (Dutch is chosen by the country), as
@@ -52,7 +55,7 @@ namespace
         return *language;
     }
 
-    WebInput g_input{ 0x504E4957u, 0, {} };
+    WebInput g_input{ 0x504E4957u, 0, {}, 0 };
     std::atomic<bool> g_registered;
     uint32_t g_packet[4];
     WebPad g_last[4];
@@ -79,6 +82,13 @@ namespace
         }
         return false;
     }
+}
+
+// The page is hidden: gpu.cpp's HoldWhileSuspended holds the game between two frames (stubs.cpp).
+bool WebPageHidden()
+{
+    Register();
+    return __atomic_load_n(&g_input.hidden, __ATOMIC_ACQUIRE) != 0;
 }
 
 // u32 XamInputGetCapabilities(u32 UserIndex, u32 Flags, XINPUT_CAPABILITIES* Caps)
@@ -123,6 +133,9 @@ PPC_FUNC(__imp__XamInputGetState)
         ctx.r3.u64 = ERROR_DEVICE_NOT_CONNECTED_;
         return;
     }
+    // The direct boot (CRASH_SKIP_INTROS) presses START on the title screen for player 1.
+    if (user == 0)
+        pad.buttons |= boot::Buttons();
     // The packet number changes with the state, as XInput's does.
     if (memcmp(&pad.buttons, &g_last[user].buttons, 12) != 0)
     {
