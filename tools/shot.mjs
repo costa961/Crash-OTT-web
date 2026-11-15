@@ -40,6 +40,8 @@ if (args.includes('--download')) {
     console.log(`download: ${await page.textContent('#dataText')} in ${((Date.now() - t) / 1000).toFixed(0)} s`);
   } else console.log(`download: ${await page.textContent('#dataText')}`);
 }
+// --fps: the start page's "Show FPS" on
+if (args.includes('--fps')) await page.check('#optFps');
 await page.click('#play');
 const t0 = Date.now();
 for (const s of at) {

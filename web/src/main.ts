@@ -91,7 +91,7 @@ async function start(audio: AudioContext) {
           case 'ready': if (++ready === POOL) resolve(); break;
           case 'log': log(m.line); break;
           case 'gpu':
-            try { executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log }); }
+            try { executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log }); startFps(() => executor?.framesPresented ?? 0); }
             catch (e) { fail(String(e)); }
             break;
           case 'input': attachInput(memory, m.block, log); break;
@@ -119,6 +119,25 @@ async function start(audio: AudioContext) {
   status('');
   Atomics.store(ctl, C_POOL, S_MAIN);
   Atomics.notify(ctl, C_POOL);
+}
+
+// ---- the FPS counter (the start page's "Show FPS", remembered in this browser) ----
+const optFps = document.getElementById('optFps') as HTMLInputElement;
+const fpsEl = document.getElementById('fps') as HTMLDivElement;
+try { optFps.checked = localStorage.getItem('crashott-fps') === '1'; } catch { /* no storage */ }
+optFps.onchange = () => { try { localStorage.setItem('crashott-fps', optFps.checked ? '1' : '0'); } catch { /* no storage */ } };
+
+/** Frames the game presented per second, twice a second (frames(): presented so far). */
+function startFps(frames: () => number) {
+  if (!optFps.checked) return;
+  fpsEl.hidden = false;
+  let last = frames(), lastT = performance.now();
+  fpsEl.textContent = '-- FPS';
+  setInterval(() => {
+    const n = frames(), t = performance.now();
+    fpsEl.textContent = `${((n - last) * 1000 / (t - lastT)).toFixed(1)} FPS`;
+    last = n; lastT = t;
+  }, 500);
 }
 
 // ---- game data in the browser's storage (host/download-worker.ts) ----

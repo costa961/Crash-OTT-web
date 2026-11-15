@@ -17,6 +17,8 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <chrono>
+#include <unordered_map>
 #include <vector>
 
 // Hands the control block to the host. Returns nonzero when a page will attach an executor (the
@@ -119,7 +121,11 @@ namespace gpu::rhi
                     if (attempt == 0)
                         Submit();
                     if (Attached())
+                    {
+                        auto t0 = std::chrono::steady_clock::now();
                         __builtin_wasm_memory_atomic_wait32(Atom(m_ctl, WG_CTL_FENCE), int32_t(m_ctl->consumedFence), 1000000);
+                        m_uploadWaitNs += uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
+                    }
                     Retire();
                     offset = m_ring.TryAllocate(size, alignment);
                 }
@@ -242,17 +248,59 @@ namespace gpu::rhi
                 return shader;
             }
 
-            Pipeline* GetDrawPipeline(const DrawPipelineKey& key, bool, bool* deferred) override
+            // The key with its padding zeroed: it is compared and hashed as bytes, and the renderer's
+            // copies of it (by value) leave the padding after the last field undefined, which made
+            // every draw a new pipeline.
+            static DrawPipelineKey Normalized(const DrawPipelineKey& in)
+            {
+                DrawPipelineKey k;
+                memset(&k, 0, sizeof(k));
+                k.vs = in.vs;
+                k.ps = in.ps;
+                k.gs = in.gs;
+                k.vsHash = in.vsHash;
+                k.psHash = in.psHash;
+                for (int i = 0; i < 4; i++)
+                {
+                    k.colorFormats[i] = in.colorFormats[i];
+                    k.blend[i] = in.blend[i];
+                }
+                k.depthFormat = in.depthFormat;
+                k.colorCount = in.colorCount;
+                k.colorMask = in.colorMask;
+                k.depthControl = in.depthControl;
+                k.stencilMasks = in.stencilMasks;
+                k.depthBias = in.depthBias;
+                k.slopeBias = in.slopeBias;
+                k.cull = in.cull;
+                k.topology = in.topology;
+                k.depthClip = in.depthClip;
+                k.stripCut = in.stripCut;
+                k.keepFormats = in.keepFormats;
+                return k;
+            }
+
+            Pipeline* GetDrawPipeline(const DrawPipelineKey& rendererKey, bool, bool* deferred) override
             {
                 if (deferred)
                     *deferred = false;
+                const DrawPipelineKey key = Normalized(rendererKey);
                 std::lock_guard lock(m_pipelineMutex);
+                // Consecutive draws mostly share their pipeline.
+                if (m_lastPipeline && !memcmp(&m_lastKey, &key, sizeof(key)))
+                    return m_lastPipeline;
                 uint64_t hash = HashBytes(&key, sizeof(key));
-                for (auto& [h, k, p] : m_drawPipelines)
+                auto range = m_drawPipelines.equal_range(hash);
+                for (auto it = range.first; it != range.second; ++it)
                 {
-                    if (h == hash && !memcmp(&k, &key, sizeof(key)))
-                        return p;
+                    if (!memcmp(&it->second.key, &key, sizeof(key)))
+                    {
+                        m_lastKey = key;
+                        m_lastPipeline = it->second.pipeline;
+                        return m_lastPipeline;
+                    }
                 }
+                m_pipelineMisses++;
                 auto* pipeline = new WgPipeline;
                 pipeline->id = NextId();
                 WgDrawPipeline r{};
@@ -275,7 +323,9 @@ namespace gpu::rhi
                 r.stripCut = key.stripCut;
                 r.keepFormats = key.keepFormats;
                 Record(WG_CREATE_DRAW_PIPELINE, &r, sizeof(r));
-                m_drawPipelines.push_back({ hash, key, pipeline });
+                m_drawPipelines.emplace(hash, CachedPipeline{ key, pipeline });
+                m_lastKey = key;
+                m_lastPipeline = pipeline;
                 return pipeline;
             }
 
@@ -431,9 +481,15 @@ namespace gpu::rhi
 
             void LogStats() override
             {
-                Log("[webgpu] %llu frame(s) recorded, %u presented by the page, %s, upload ring %llu KB in use",
+                Log("[webgpu] %llu frame(s) recorded, %u presented by the page, %s, upload ring %llu KB in use; "
+                    "%zu draw pipelines (%llu created since the last report); %.1f ms waiting for command ring room, "
+                    "%.1f ms for upload ring room since the last report",
                     (unsigned long long)m_frames, m_ctl->presentedFrames, Attached() ? "page attached" : "no page (records dropped)",
-                    (unsigned long long)(m_ring.Used() >> 10));
+                    (unsigned long long)(m_ring.Used() >> 10), m_drawPipelines.size(), (unsigned long long)m_pipelineMisses,
+                    double(m_ringWaitNs) / 1e6, double(m_uploadWaitNs) / 1e6);
+                m_pipelineMisses = 0;
+                m_ringWaitNs = 0;
+                m_uploadWaitNs = 0;
             }
 
         private:
@@ -449,11 +505,15 @@ namespace gpu::rhi
             std::mutex m_pipelineMutex;
             struct CachedPipeline
             {
-                uint64_t hash;
                 DrawPipelineKey key;
                 WgPipeline* pipeline;
             };
-            std::vector<CachedPipeline> m_drawPipelines;
+            std::unordered_multimap<uint64_t, CachedPipeline> m_drawPipelines;  // by HashBytes of the key
+            DrawPipelineKey m_lastKey{};
+            WgPipeline* m_lastPipeline = nullptr;
+            uint64_t m_pipelineMisses = 0;
+            // Time the command processor spent waiting for the page (ring room), between reports.
+            std::atomic<uint64_t> m_ringWaitNs{ 0 }, m_uploadWaitNs{ 0 };
             struct LateFree
             {
                 uint32_t fence;
@@ -611,7 +671,9 @@ namespace gpu::rhi
                     }
                     if (!Attached())
                         return nullptr;
+                    auto t0 = std::chrono::steady_clock::now();
                     __builtin_wasm_memory_atomic_wait32(Atom(m_ctl, WG_CTL_READPOS), int32_t(read), 1000000);
+                    m_ringWaitNs += uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
                 }
             }
 

@@ -172,6 +172,9 @@ export class Executor {
     }, 5000);
   }
 
+  /** Frames presented so far (the page's FPS counter). */
+  get framesPresented(): number { return this.stats.frames; }
+
   stop() {
     this.running = false;
     Atomics.store(this.ctl().i32, CTL.attached, 0);
