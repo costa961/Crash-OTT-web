@@ -1,4 +1,4 @@
-# Crash-OTT-web
+# Crash of the Titans web
 
 Crash of the Titans (Xbox 360) in the browser, built from **your own copy** of the game.
 
@@ -21,10 +21,12 @@ Taken in Chrome from the author's own copy, with the 60 FPS mode and the FPS cou
 
 | | |
 |---|---|
-| ![The start page: language, game data download, switches, Controls, Graphics, saves](docs/images/start-page.jpg) | ![The title screen at 60 fps](docs/images/title-screen.jpg) |
+| ![The start page: Start, Online co-op, language, game data download, switches, Controls, Graphics, saves](docs/images/start-page.jpg) | ![The title screen at 60 fps](docs/images/title-screen.jpg) |
 | The start page | The title screen |
 | ![Episode 1's intro, with the page's "hold to skip" prompt](docs/images/episode-intro.jpg) | ![Crash in the first level at 60 fps](docs/images/gameplay.jpg) |
 | Episode 1's intro (hold to skip) | The first level |
+| ![The Online co-op dialog: the player's name, Host a session, the sessions on this server](docs/images/online-coop.jpg) | ![Two players in the first level in online co-op, the session's panel at the top right](docs/images/coop-gameplay.jpg) |
+| Online co-op: host, or join a session | Two players in online co-op |
 
 ## Requirements
 
