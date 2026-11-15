@@ -60,12 +60,19 @@ Differences from the PC build, which reserves the 4 GB with `VirtualAlloc` and a
   polls the ring-buffer write pointer (Atomics.wait on a hook, or a tight poll), and XMA kicks are caught by
   hooking the guest functions that write them.
 
+The runtime's heap stays below `0x40000000` through `runtime/sbrk.c`: wasi-libc's own sbrk grows memory
+at its end, which here belongs to the guest.
+
 ## Threads, fibers, exceptions
 
 - Guest threads → wasi threads (Web Workers sharing the memory); the page needs cross-origin isolation
-  (COOP/COEP), as GTA SA web already serves.
-- XAPI fibers (`SwitchToFiber`, used by the loader) → one worker per fiber with a hand-off semaphore.
-- setjmp/longjmp and C++ exceptions → wasm exception handling (`-mexception-handling`, `-wasm-enable-sjlj`).
+  (COOP/COEP), as GTA SA web already serves. `ExitThread` longjmps back to the thread's entry (wasi-libc
+  has no `pthread_exit`, as in GTA SA web).
+- XAPI fibers (`SwitchToFiber`, used by the loader) → one thread per fiber that runs only while it holds
+  the baton (a futex gate). A resumed fiber sets `__tls_base` to the thread-local block of the thread that
+  resumed it, so the runtime's `thread_local`s (current guest thread, current fiber) behave as on Windows,
+  where a fiber shares its thread's. Only one thread of a chain runs at a time.
+- setjmp/longjmp → wasm exception handling (`-mexception-handling`, `-wasm-enable-sjlj`, exnref).
 
 ## Milestones
 
@@ -75,9 +82,17 @@ Differences from the PC build, which reserves the 4 GB with `VirtualAlloc` and a
    (FPSCR and `__rdtsc` for wasm; `simde__m128`/`simde__m128i` are the same `v128_t` there, so
    `CRRegister::setFromMask` picks the movemask from its `imm`). A trial link leaves 156 undefined symbols:
    the 152 kernel/XAM imports (`__imp__Ke*`, `Ex*`, `Xam*`, … — crashott-pc `runtime/kernel`) plus
-   `__c_longjmp` and a few helpers. Next: the module links with the runtime.
-3. **Boot to the first frame headless** (Node runner, as `tools/run-node.mjs` in GTA SA web): kernel HLE,
-   XEX loader, VFS over the game folder, PM4 swaps counted.
+   `__c_longjmp` and a few helpers.
+2b. **The module links with the kernel** — done: `tools/wasm_runtime.sh` builds `web/runtime.txt` (crashott-pc's
+   kernel, file system, XEX loader and XenonUtils unchanged, plus `runtime/`: `platform_wasm.cpp`,
+   `memory_wasm.cpp`, `sbrk.c`, `diagnostics_wasm.cpp`, `main_wasm.cpp`, `stubs.cpp`) into a 23 MB
+   `out/web/crashott.wasm`. Built with `-fno-exceptions` (wasi-sdk's libc++ has none; the runtime throws none).
+3. **Boot to the first frame headless** — in progress. `tools/run-node.mjs` (from GTA SA web's runner) boots
+   the module under Node (`--experimental-wasm-exnref`; Chrome has exnref on by default): the XEX is
+   decrypted, the call table filled, the title creates 12 guest threads, switches its loading fibers, reads
+   XAM notifications and sign-in state and reaches its first `VdSwap`, where it waits for the GPU (still a
+   stub). Linear memory: 3 GB. Next: crashott-pc's `gpu/video_imports.cpp`, `gpu.cpp` and
+   `command_processor.cpp` with the ring-buffer write pointer polled instead of trapped, PM4 swaps counted.
 4. **WebGPU renderer**: `rhi::Device` on WebGPU, Xenos → WGSL; menus on screen.
 5. **Audio, input, saves** (OPFS / IndexedDB).
 6. **Performance and polish**, deploy (Caddy + Docker, as GTA SA web).

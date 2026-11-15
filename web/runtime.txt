@@ -1,0 +1,45 @@
+# Sources of the browser module's runtime (tools/wasm_runtime.sh).
+#   cpc <path>   third_party/crashott-pc/runtime/<path>, compiled unchanged
+#   xu  <path>   out/XenonRecomp/<path> (XenonUtils: XEX decryption at startup)
+#   web <path>   runtime/<path>, this project's WebAssembly replacements and stubs
+
+# guest CPU, image, kernel HLE
+cpc cpu/guest_thread.cpp
+cpc kernel/imports.cpp
+cpc kernel/memory_imports.cpp
+cpc kernel/page_heap.cpp
+cpc kernel/objects.cpp
+cpc kernel/dispatcher_imports.cpp
+cpc kernel/sync_imports.cpp
+cpc kernel/thread_imports.cpp
+cpc kernel/threads.cpp
+cpc kernel/rtl_imports.cpp
+cpc kernel/fibers.cpp
+cpc kernel/file_imports.cpp
+cpc kernel/xam_notify_imports.cpp
+cpc kernel/xam_user_imports.cpp
+cpc kernel/xam_content_imports.cpp
+cpc kernel/xex_loader.cpp
+cpc fs/vfs.cpp
+cpc fs/rcf_overlay.cpp
+cpc fs/xenon_drive_hooks.cpp
+cpc diagnostics.cpp
+cpc symbols.cpp
+cpc platform/file_posix.cpp
+
+# XEX decryption (crashott-pc's XexImage target)
+cpc xex_image/xex_image.cpp
+xu  XenonUtils/xex.cpp
+xu  XenonUtils/image.cpp
+xu  XenonUtils/xex_patcher.cpp
+xu  XenonUtils/memory_mapped_file.cpp
+xu  thirdparty/tiny-AES-c/aes.c
+xu  thirdparty/libmspack/libmspack/mspack/lzxd.c
+
+# WebAssembly replacements
+web platform_wasm.cpp
+web memory_wasm.cpp
+web sbrk.c
+web diagnostics_wasm.cpp
+web main_wasm.cpp
+web stubs.cpp

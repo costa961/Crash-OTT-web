@@ -36,9 +36,16 @@ docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src crash
 
 # 4. C++ -> wasm objects (out/web/obj)
 docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_recomp.sh
+
+# 5. Runtime + link -> out/web/crashott.wasm
+docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_runtime.sh
+
+# Headless boot test under Node (no graphics yet)
+docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src crashott-build \
+  node --experimental-wasm-exnref tools/run-node.mjs --game /game --timeout 60
 ```
 
-The next steps (the wasm module, the page) come with the next milestones.
+The page (WebGPU, audio, input) comes with the next milestones.
 
 ## Legal
 
