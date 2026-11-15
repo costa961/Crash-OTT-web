@@ -140,7 +140,12 @@ at its end, which here belongs to the guest.
 
 ## Known gaps
 
-- Stencil views sampled by draws: the null texture (depth views are copied to `r32float`).
+- Stencil views sampled by draws: the null texture (depth views are copied to `r32float`); no draw of the menus,
+  the videos or the first level samples one (the executor logs "a draw samples a ... texture" when one does).
+- The cutscene skipper's prompt (crashott-pc's `skip_cinematics.cpp`) is drawn with the PC build's menu art, not
+  ported: the hold to skip works, the prompt doesn't show.
+- Skip intro videos (`CRASH_SKIP_INTROS`): crashott-pc's direct boot checks the frontend data through the PC
+  frontend's EXIT GAME exit, which the browser build doesn't add; `settings::QuitExit` answers the retail value.
 - crashott-pc's graphics options that patch shaders (motion blur, depth of field, shadow softness): their patches
   are HLSL and the shaders WGSL, so they are off (the original look); its SMAA, lighting remaster and overlay passes
   have no WGSL yet.

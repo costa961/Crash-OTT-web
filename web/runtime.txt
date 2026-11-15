@@ -90,3 +90,7 @@ web input_wasm.cpp
 # Direct boot (CRASH_SKIP_INTROS: no logo videos, no title screen) and the frontend hook it needs
 cpc settings/direct_boot.cpp
 web frontend_web.cpp
+
+# Skipping cutscenes and intro videos: hold B / START / A (keyboard: K / Esc / Space-Enter)
+cpc settings/skip_cinematics.cpp
+web cutscene_stubs.cpp

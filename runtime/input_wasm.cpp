@@ -9,6 +9,7 @@
 // visibility (nonzero while the page is hidden: the game is held, gpu/window.h Suspended).
 #include "kernel/kernel.h"
 #include "settings/direct_boot.h"
+#include "settings/skip_cinematics.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -133,9 +134,16 @@ PPC_FUNC(__imp__XamInputGetState)
         ctx.r3.u64 = ERROR_DEVICE_NOT_CONNECTED_;
         return;
     }
-    // The direct boot (CRASH_SKIP_INTROS) presses START on the title screen for player 1.
     if (user == 0)
+    {
+        // The direct boot (CRASH_SKIP_INTROS) presses START on the title screen for player 1.
         pad.buttons |= boot::Buttons();
+        // Holding B / START / A skips a cutscene or an intro video; those buttons are hidden from the
+        // game meanwhile (crashott-pc's settings/skip_cinematics.cpp, as its XamInputGetState does).
+        XINPUT_GAMEPAD gamepad{ pad.buttons, pad.leftTrigger, pad.rightTrigger, pad.thumbLX, pad.thumbLY, pad.thumbRX, pad.thumbRY };
+        cutscenes::FilterGameInput(gamepad, true);
+        pad.buttons = gamepad.wButtons;
+    }
     // The packet number changes with the state, as XInput's does.
     if (memcmp(&pad.buttons, &g_last[user].buttons, 12) != 0)
     {

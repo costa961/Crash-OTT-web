@@ -45,14 +45,6 @@ namespace settings::menu
     void Draw(uint32_t, uint32_t) {}
     void SetAvailable(bool) {}
 }
-namespace cutscenes
-{
-    void Draw(uint32_t, uint32_t) {}
-    bool VideoPlaying() { return false; }
-    // (settings/direct_boot.cpp) the cutscene skipper is not ported yet
-    void NoteFrontendNode(uint32_t) {}
-    void NoteMovie(int) {}
-}
 namespace touch_controls { void Draw(uint32_t, uint32_t) {} }
 namespace subtitles
 {

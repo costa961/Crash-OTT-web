@@ -62,8 +62,13 @@ On the start page:
 - **Language**: the six languages of the disc (the game's own voices and texts).
 - **Download game data** (once, about 1.9 GB): the game files the game reads, into the browser's storage, for
   fast loads. Without it the game reads them from the local server.
+- **Skip intro videos**: no logo videos, no legal-text wait, no title screen: straight to the main menu.
 - **FPS counter**: on/off.
 - **Download logs**: the log of the last session and of this one (to report a problem).
+
+In game: **F** or a double-click toggles full screen (F11 works too). Switching to another tab or minimizing
+the window pauses the game until you come back. **Hold B, Start or A** (keyboard: K, Esc, Space / Enter) for a
+moment to skip a cutscene or an intro video (crashott-pc's skipper; its on-screen prompt is not drawn yet).
 
 Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the keyboard as pad 1:
 
