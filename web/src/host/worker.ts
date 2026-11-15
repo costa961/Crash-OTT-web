@@ -14,7 +14,8 @@ class ProcExit { constructor(public code: number) {} }
 const post = (m: ToPage) => (self as unknown as Worker).postMessage(m);
 
 self.onmessage = async (ev: MessageEvent<WorkerInit>) => {
-  const { mod, memory, ctl: ctlBuf, fdt: fdtBuf, slot, cfg } = ev.data;
+  const { mod, memory, ctl: ctlBuf, fdt: fdtBuf, slot, cfg, ioPort, ioReply } = ev.data;
+  fs.useIo(ioPort, ioReply);
   const ctl = new Int32Array(ctlBuf);
   const fdI = new Int32Array(fdtBuf), fdF = new Float64Array(fdtBuf), fdU = new Uint8Array(fdtBuf);
   const te = new TextEncoder(), td = new TextDecoder();

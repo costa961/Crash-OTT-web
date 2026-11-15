@@ -23,6 +23,9 @@ export interface WorkerInit {
   fdt: SharedArrayBuffer;
   slot: number;
   cfg: BootConfig;
+  /** the I/O worker (io-worker.ts): this worker's port to it and its reply block */
+  ioPort: MessagePort;
+  ioReply: SharedArrayBuffer;
 }
 
 export type ToPage =

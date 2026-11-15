@@ -103,7 +103,7 @@ at its end, which here belongs to the guest.
    (`runtime/stubs.cpp`): in 120 s the title runs 3,660 frames at its 30 fps (2 vblanks per swap), every
    swap packet executed by the command processor, ~10,000 interrupts delivered, and opens the Bink shaders
    for its intro movies.
-4. **WebGPU renderer** — first frames on screen. crashott-pc's renderer (`xenos_renderer.cpp`, texture decode,
+4. **WebGPU renderer** — done (see Known gaps). crashott-pc's renderer (`xenos_renderer.cpp`, texture decode,
    resolves, EDRAM targets) runs unchanged on a recorder `rhi::Device` (`runtime/gpu_web/rhi_webgpu.cpp`,
    contract `webgpu_proto.h`): every call is a record in a command ring in shared memory, resources are
    numbered on the game side, and the upload ring (vertex data, indices, constants, texture levels) is
@@ -116,5 +116,34 @@ at its end, which here belongs to the guest.
    stencil views sampled by draws, SMAA, the lighting remaster, the overlay, viewports outside their target.
    Headless check: `tools/shot.mjs` in GTA SA web's browser image, server and Chrome in one container
    (`?offscreen=1`: SwiftShader can't allocate a canvas swap chain there, frames are read back to a 2D canvas).
-5. **Audio, input, saves** (OPFS / IndexedDB).
-6. **Performance and polish**, deploy (Caddy + Docker, as GTA SA web).
+5. **Audio, input, saves, data** — done.
+   - Audio: crashott-pc's XAudio / XMA imports, XMA decoder and mixer. The decoder's FFmpeg (WMA Pro only) is
+     built from source for wasm (`tools/ffmpeg_wasm.sh`) and linked statically (`runtime/ffmpeg_wasm.cpp`).
+     The mixer's frames go into a ring in shared memory that an AudioWorklet plays (`runtime/audio_device_web.cpp`,
+     `web/src/audio-worklet.ts`). The XMA kick / lock / clear registers are write-1 registers the PC build
+     traps: here every 32-bit guest store into `0x7FC00000-0x7FFFFFFF` calls `PPCMmioStore` after it lands
+     (`patches/XenonRecomp-wasm.patch`, `runtime/mmio_wasm.cpp`), which also wakes the GPU command processor.
+   - XMP (the Xbox music player) messages: crashott-pc's `xmsg_imports.cpp` (the title waits for their answers
+     while it loads).
+   - Input: the XAM input imports read four pads from a block the page writes once per frame
+     (`runtime/input_wasm.cpp`, `web/src/input.ts`: Gamepad API, keyboard as pad 1, rumble). The same file answers
+     the region, language and XConfig settings; the language is the start page's (`CRASHOTT_LANGUAGE`).
+   - Game data: the start page downloads the files the game reads into OPFS (`web/src/host/download-worker.ts`,
+     `gamecache.ts`); the game-thread workers open them with read-only sync access handles (`fs.ts`).
+   - Saves (`/userdata`): OPFS through an I/O worker (`web/src/host/io-worker.ts`); the game's file calls are
+     synchronous, so each game-thread worker posts its request and waits on a reply word (`Atomics.wait`).
+   - Texture write watch off (`CRASH_TEXTURE_WATCH=0`): it relies on page protection, which WebAssembly lacks;
+     the renderer hashes textures instead (CPU-updated textures: the Bink videos, dynamic UI).
+6. **Performance** — 30 fps in game (the original rate). The fix that mattered: the WebGPU device's pipeline cache
+   hashed `DrawPipelineKey` with its padding, which the renderer's copies leave undefined, so every draw made a
+   new pipeline; keys are normalized now (`Normalized` in `rhi_webgpu.cpp`).
+
+## Known gaps
+
+- Stencil views sampled by draws: the null texture (depth views are copied to `r32float`).
+- crashott-pc's graphics options that patch shaders (motion blur, depth of field, shadow softness): their patches
+  are HLSL and the shaders WGSL, so they are off (the original look); its SMAA, lighting remaster and overlay passes
+  have no WGSL yet.
+- Firefox and Safari: untested (WebGPU, wasm exception handling with exnref).
+- Linear memory grows to 3 GB (commit charge on Windows).
+- Deploy on a server (Caddy + Docker, as GTA SA web): to do.

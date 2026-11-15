@@ -4,6 +4,7 @@
 //
 // Query parameters: env=KEY=VALUE (repeatable) for the game's environment.
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
+import { IO_REPLY_BYTES } from './host/io-proto';
 import { Executor } from './gpu/executor';
 import { attachInput } from './input';
 import { cacheState, fmtBytes, LANGUAGES } from './host/gamecache';
@@ -17,17 +18,49 @@ const play = document.getElementById('play') as HTMLButtonElement;
 const q = new URLSearchParams(location.search);
 
 const status = (s: string) => { statusEl.textContent = s; };
-// The log: the console, and a buffer the Log button saves to a file (to report a problem).
+// The log: the console, and a buffer the start page's "Download logs" saves to a file (to report a
+// problem, as GTA San Andreas web's). The session's log is also kept in the browser's storage every
+// few seconds (OPFS "logs/session.txt"), so after a problem a reload of the page still has it: the
+// download is the previous session's log, then this one's.
 const lines: string[] = [];
+let logDirty = false;
 const keep = (s: string) => {
   lines.push(`${(performance.now() / 1000).toFixed(3).padStart(10)} ${s}`);
   if (lines.length > 200000) lines.splice(0, 50000);
+  logDirty = true;
 };
 const log = (s: string) => { console.log(s); keep(s); };
 const fail = (s: string) => { console.error(s); keep(s); status(s); };
-(document.getElementById('logBtn') as HTMLButtonElement).onclick = () => {
+const SESSION_LOG = 'session.txt', LOG_KEEP = 50000;
+let previousLog = '';
+async function logDir(): Promise<FileSystemDirectoryHandle> {
+  return (await navigator.storage.getDirectory()).getDirectoryHandle('logs', { create: true });
+}
+// the previous session's log, then this session's from now on
+const logReady = (async () => {
+  try {
+    const dir = await logDir();
+    previousLog = await (await (await dir.getFileHandle(SESSION_LOG, { create: true })).getFile()).text();
+  } catch { /* no storage: this session's log only */ }
+})();
+setInterval(async () => {
+  if (!logDirty) return;
+  logDirty = false;
+  try {
+    await logReady;
+    const w = await (await (await logDir()).getFileHandle(SESSION_LOG, { create: true })).createWritable();
+    await w.write(`${new Date().toISOString()} ${navigator.userAgent}\n${location.href}\n\n${lines.slice(-LOG_KEEP).join('\n')}\n`);
+    await w.close();
+  } catch { /* no storage */ }
+}, 3000);
+(document.getElementById('logs') as HTMLButtonElement).onclick = async () => {
+  await logReady;
+  const current = `${navigator.userAgent}\n${location.href}\n\n${lines.join('\n')}\n`;
+  const text = previousLog
+    ? `===== previous session =====\n${previousLog}\n===== this session =====\n${current}`
+    : current;
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([`${navigator.userAgent}\n${location.href}\n\n${lines.join('\n')}\n`], { type: 'text/plain' }));
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
   a.download = `crashott-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
@@ -81,6 +114,18 @@ async function start(audio: AudioContext) {
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
+  // The saves in the browser's storage: the I/O worker (host/io-worker.ts), ready once it has copied
+  // the saves of an older build from the local server.
+  await navigator.storage.persist?.().catch(() => false);
+  const io = new Worker(new URL('./host/io-worker.js', import.meta.url), { type: 'module', name: 'io' });
+  await new Promise<void>((resolve, reject) => {
+    io.onerror = e => reject(new Error(`I/O worker: ${e.message}`));
+    io.onmessage = (ev: MessageEvent<{ t: 'ready' } | { t: 'log'; line: string }>) => {
+      if (ev.data.t === 'log') log(ev.data.line);
+      else resolve();
+    };
+    io.postMessage({ t: 'init', memory });
+  });
   await new Promise<void>((resolve, reject) => {
     for (let slot = 0; slot < POOL; slot++) {
       const worker = new Worker(new URL('./host/worker.js', import.meta.url), { type: 'module', name: `game ${slot}` });
@@ -108,7 +153,10 @@ async function start(audio: AudioContext) {
           case 'exit': status(`The game exited (${m.code}).`); executor?.stop(); break;
         }
       };
-      worker.postMessage({ mod, memory, ctl: ctlBuf, fdt, slot, cfg });
+      const channel = new MessageChannel();
+      io.postMessage({ t: 'port', port: channel.port2 }, [channel.port2]);
+      worker.postMessage({ mod, memory, ctl: ctlBuf, fdt, slot, cfg, ioPort: channel.port1, ioReply: new SharedArrayBuffer(IO_REPLY_BYTES) },
+        [channel.port1]);
     }
   });
   log(`[page] ${POOL} workers ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
@@ -135,7 +183,7 @@ function startFps(frames: () => number) {
   fpsEl.textContent = '-- FPS';
   setInterval(() => {
     const n = frames(), t = performance.now();
-    fpsEl.textContent = `${((n - last) * 1000 / (t - lastT)).toFixed(1)} FPS`;
+    fpsEl.textContent = `${Math.round((n - last) * 1000 / (t - lastT))} FPS`;
     last = n; lastT = t;
   }, 500);
 }

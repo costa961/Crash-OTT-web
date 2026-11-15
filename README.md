@@ -2,8 +2,9 @@
 
 Crash of the Titans (Xbox 360) in the browser, built from **your own copy** of the game.
 
-> **Status: early work in progress, not playable yet.** See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> for the plan and milestones.
+> **Status: playable, work in progress.** The game boots, plays its videos, menus and story at its
+> original 30 fps in Chrome / Edge, with sound and controls. Some PC-only extras of crashott-pc are off, and
+> a few rendering paths are still simplified: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 This repository contains no game code and no game assets. You supply your own legally obtained
 Xbox 360 disc image; a Docker build turns it into a browser module on your machine. What it produces is
@@ -55,7 +56,30 @@ docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src -p 12
   node tools/serve.mjs --game /game --host 0.0.0.0
 ```
 
-Status: the game boots and draws its first screens; no audio and no input yet.
+## Playing
+
+On the start page:
+- **Language**: the six languages of the disc (the game's own voices and texts).
+- **Download game data** (once, about 1.9 GB): the game files the game reads, into the browser's storage, for
+  fast loads. Without it the game reads them from the local server.
+- **FPS counter**: on/off.
+- **Download logs**: the log of the last session and of this one (to report a problem).
+
+Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the keyboard as pad 1:
+
+| Pad | Keyboard |
+|---|---|
+| Left stick | W A S D |
+| D-pad | arrows |
+| A | Space / Enter |
+| B / X / Y | K / J / I |
+| LB / RB | U / O |
+| LT / RT | Q / E |
+| Start / Back | Esc / Tab |
+| Right stick | numpad 8 4 5 6 |
+
+Saves stay in the browser (its storage for this site); the first start copies the saves an older build left
+on the local server (`out/userdata/content`).
 
 ## Legal
 
