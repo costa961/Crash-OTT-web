@@ -3,10 +3,10 @@
 Crash of the Titans (Xbox 360) in the browser, built from **your own copy** of the game.
 
 > **Status: playable, work in progress.** The game boots, plays its videos, menus and story at its
-> original 30 fps in Chrome / Edge, with sound and controls. Some PC-only extras of crashott-pc are off, and
+> original 30 fps (or 60) in Chrome / Edge, with sound and controls. Some PC-only extras of crashott-pc are off, and
 > a few rendering paths are still simplified: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-This repository contains no game code and no game assets. You supply your own legally obtained
+This repository contains no game code and no game files (only the few screenshots below). You supply your own legally obtained
 Xbox 360 disc image; a Docker build turns it into a browser module on your machine. What it produces is
 derived from your game: keep it for yourself, never publish it (a private server of your own, behind a login, is
 fine: [deploy/](deploy/README.md)).
@@ -14,6 +14,17 @@ fine: [deploy/](deploy/README.md)).
 It ports [crashott-pc](https://github.com/VitoMiguelF/crashott-pc) (a static recompilation of the
 Xbox 360 game for PC, built with [XenonRecomp](https://github.com/hedge-dev/XenonRecomp)) to WebAssembly and
 WebGPU.
+
+## Screenshots
+
+Taken in Chrome from the author's own copy, with the 60 FPS mode and the FPS counter on.
+
+| | |
+|---|---|
+| ![The start page: language, game data download, switches, Controls, Graphics, saves](docs/images/start-page.jpg) | ![The title screen at 60 fps](docs/images/title-screen.jpg) |
+| The start page | The title screen |
+| ![Episode 1's intro, with the page's "hold to skip" prompt](docs/images/episode-intro.jpg) | ![Crash in the first level at 60 fps](docs/images/gameplay.jpg) |
+| Episode 1's intro (hold to skip) | The first level |
 
 ## Requirements
 

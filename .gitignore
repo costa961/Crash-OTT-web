@@ -24,9 +24,14 @@ web/dist/
 .env.*
 !.env.example
 
+# What the start page downloads: your saves (Export saves) and your session logs (Download logs)
+crashott-saves-*.zip
+crashott-log-*.txt
+
 # OS / editor
 .DS_Store
 Thumbs.db
 desktop.ini
 .idea/
+.vscode/
 *.log
