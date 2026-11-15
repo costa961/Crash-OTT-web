@@ -106,3 +106,20 @@ diff --git a/runtime/gpu/gpu.cpp b/runtime/gpu/gpu.cpp
 +    }
 +}
 +#endif
+diff --git a/runtime/gpu/xenos_renderer.cpp b/runtime/gpu/xenos_renderer.cpp
+--- a/runtime/gpu/xenos_renderer.cpp
++++ b/runtime/gpu/xenos_renderer.cpp
+@@ -553,7 +553,13 @@
+ #endif
+                 char name[64];
+                 snprintf(name, sizeof(name), "%s_%016llx", entry->info.stage == ShaderStage::Pixel ? "ps" : "vs", (unsigned long long)entry->info.hash);
++#if defined(CRASH_WEB)
++                // WebGPU: the graphics options' shader patches are HLSL (graphics_options.cpp); the
++                // translated shaders are WGSL, so they are left out (the options keep their defaults).
++                if (const char* patch = nullptr)
++#else
+                 if (const char* patch = graphics::PatchShader(entry->info.stage, entry->info.hash, entry->info.hlsl))
++#endif
+                     Log("[gpu] %s: graphics option \"%s\" applied", name, patch);
+                 if (g_dumpShaders && !g_shaderCacheDir.empty())
+                 {

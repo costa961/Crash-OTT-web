@@ -9,7 +9,7 @@
 //   and the ring as vertex data; group 1 = texture N at binding N, its sampler at 32 + N.
 // - The built-in passes' HLSL is replaced by passes.ts's WGSL of the same name.
 import { formatOf, type FormatInfo } from './formats';
-import { CLEAR_COLOR_PS, DRAW_PS, FULLSCREEN_VS, PASS_PS } from './passes';
+import { CLEAR_COLOR_PS, DEPTH_COPY_PS, DRAW_PS, FULLSCREEN_VS, PASS_PS } from './passes';
 
 // webgpu_proto.h
 const WG_MAGIC = 0x43475757, WG_VERSION = 1;
@@ -55,7 +55,7 @@ function blendFactor(f: number, alpha: boolean): GPUBlendFactor {
 const BLEND_OP: GPUBlendOperation[] = ['add', 'subtract', 'min', 'max', 'reverse-subtract'];
 
 interface Tex { texture: GPUTexture; info: FormatInfo; dxgi: number; renderDxgi: number; width: number; height: number; levels: number;
-  views: Map<string, GPUTextureView>; }
+  views: Map<string, GPUTextureView>; gen?: number; }
 interface Shader { module: GPUShaderModule | null; name: string; stage: number; textures: number[]; outputs: number[]; }
 interface DrawPipe { pipeline: GPURenderPipeline | null; group1: GPUBindGroupLayout; textures: number[]; colorCount: number; colorFormats: number[];
   depthFormat: number; }
@@ -96,6 +96,11 @@ export class Executor {
   private running = true;
   private emptyFs: GPUShaderModule | null = null;
   private presentLogs = 0;
+  /** Depth textures sampled by draws, as r32float copies (WebGPU can't bind a depth view where the
+   *  translated shaders sample a filterable float texture): texture id -> copy, made again when the
+   *  depth changed (Tex.gen: it was a depth attachment or cleared since). */
+  private depthCopies = new Map<number, { gen: number; texture: GPUTexture; view: GPUTextureView }>();
+  private depthCopyPipe: GPURenderPipeline | null = null;
   /** ?offscreen=1 (tools/shot.mjs): the back buffer is a texture of our own, read back twice a second
    *  into a 2D canvas over the WebGPU one. Headless Chrome on SwiftShader can't allocate a canvas swap
    *  chain at all; a real browser never needs this. */
@@ -232,6 +237,8 @@ export class Executor {
       case OP.DESTROY: {
         const r = this.res.get(u32[w]) as Tex | undefined;
         if (r && 'texture' in r) { this.endPass(); r.texture.destroy(); }
+        const copy = this.depthCopies.get(u32[w]);
+        if (copy) { copy.texture.destroy(); this.depthCopies.delete(u32[w]); }
         this.res.delete(u32[w]);
         return false;
       }
@@ -378,6 +385,7 @@ export class Executor {
     const full = !rect || (rect[0] <= 0 && rect[1] <= 0 && rect[2] >= width && rect[3] >= height);
     const enc = this.encoder();
     if (depthStencil && t) {
+      t.gen = (t.gen ?? 0) + 1;
       const pass = enc.beginRenderPass({ colorAttachments: [], depthStencilAttachment: {
         view: this.view(t, 0), depthLoadOp: full ? 'clear' : 'load', depthStoreOp: 'store', depthClearValue: depth,
         ...(t.info.stencil ? { stencilLoadOp: full ? 'clear' : 'load', stencilStoreOp: 'store', stencilClearValue: stencil } : {}),
@@ -524,8 +532,14 @@ export class Executor {
       fragment = { module: this.emptyFs, entryPoint: 'main', targets: targets.map(t => t ? { ...t, writeMask: 0, blend: undefined } : null) };
     }
     try {
-      entry.pipeline = this.dev.createRenderPipeline({
-        label: `${vs.name} + ${ps?.name ?? 'depth only'}`,
+      // Used at once; if the error scope then says it is invalid (a shader that doesn't compile) it is
+      // dropped, so it can cost one frame at most instead of invalidating every frame's command buffer.
+      // (Waiting for the scope before using it would be cleaner, but neither popErrorScope nor
+      // createRenderPipelineAsync settled on headless SwiftShader.)
+      const label = `${vs.name} + ${ps?.name ?? 'depth only'}`;
+      this.dev.pushErrorScope('validation');
+      const pipeline = this.dev.createRenderPipeline({
+        label,
         layout: this.dev.createPipelineLayout({ bindGroupLayouts: [this.group0Layout, group1] }),
         vertex: { module: vs.module, entryPoint: 'main' },
         fragment,
@@ -534,6 +548,12 @@ export class Executor {
           unclippedDepth: !depthClip && this.features.has('depth-clip-control') ? true : undefined },
         depthStencil,
       });
+      entry.pipeline = pipeline;
+      this.dev.popErrorScope().then(err => {
+        if (!err) return;
+        entry.pipeline = null;
+        this.warn(`pipe:${label}`, `pipeline ${label} failed, its draws are skipped: ${err.message}`);
+      }, () => {});
     } catch (e) {
       this.warn(`pipe:${vs.name}:${ps?.name}`, `pipeline ${vs.name} + ${ps?.name}: ${String(e)}`);
     }
@@ -603,6 +623,7 @@ export class Executor {
     if (depth) {
       const t = this.tex(depth);
       if (!t) return null;
+      t.gen = (t.gen ?? 0) + 1;   // its depth may change in this pass (depthCopies)
       depthStencilAttachment = { view: this.view(t, 0), depthLoadOp: 'load', depthStoreOp: 'store',
         ...(t.info.stencil ? { stencilLoadOp: 'load', stencilStoreOp: 'store' } : {}) } as GPURenderPassDepthStencilAttachment;
       if (!width) { width = t.width; height = t.height; }
@@ -614,15 +635,30 @@ export class Executor {
     return [width, height];
   }
 
-  private viewportAndScissor(pass: GPURenderPassEncoder, f32: Float32Array, i32: Int32Array, vw: number, sw: number, size: [number, number]): boolean {
+  /** systemConstants: the draw's system constants in the upload ring, when it has some: a viewport
+   *  outside the target (allowed in Vulkan, not in WebGPU) is then clamped and the difference put into
+   *  the vertex transform (xe_system.ndc_scale / ndc_offset), so every vertex lands where the original
+   *  viewport would have put it. */
+  private viewportAndScissor(pass: GPURenderPassEncoder, f32: Float32Array, i32: Int32Array, vw: number, sw: number, size: [number, number],
+                             systemConstants = -1): boolean {
     const [W, H] = size;
     let x = f32[vw], y = f32[vw + 1], w = f32[vw + 2], h = f32[vw + 3];
     const minD = Math.min(1, Math.max(0, f32[vw + 4])), maxD = Math.min(1, Math.max(0, f32[vw + 5]));
-    // WebGPU wants the viewport inside the target: clamped (counted, it changes the projection).
     if (x < 0 || y < 0 || x + w > W || y + h > H) {
-      this.warn('viewport', `a viewport outside its target (${x},${y} ${w}x${h} in ${W}x${H}) was clamped`);
       const r = Math.min(W, x + w), b = Math.min(H, y + h);
-      x = Math.max(0, x); y = Math.max(0, y); w = r - x; h = b - y;
+      const x2 = Math.max(0, x), y2 = Math.max(0, y), w2 = r - x2, h2 = b - y2;
+      if (w2 > 0 && h2 > 0 && systemConstants >= 0) {
+        // pixel = x + (ndc + 1) w / 2 must equal x2 + (ndc' + 1) w2 / 2 (y: from the top, ndc up)
+        const sx = w / w2, ox = (2 * (x - x2) + w - w2) / w2;
+        const sy = h / h2, oy = 1 - 2 * (y - y2) / h2 - h / h2;
+        const sys = new Float32Array(this.mem.buffer as unknown as ArrayBuffer, this.ctl().u32[CTL.uploadRing] + systemConstants, 8);
+        // clip' = clip * S + O * w, applied after the shader's clip * ndc_scale + ndc_offset * w
+        sys[4] = sys[4] * sx + ox; sys[5] = sys[5] * sy + oy;
+        sys[0] *= sx; sys[1] *= sy;
+      } else if (w2 > 0 && h2 > 0) {
+        this.warn('viewport', `a viewport outside its target (${x},${y} ${w}x${h} in ${W}x${H}) was clamped`);
+      }
+      x = x2; y = y2; w = w2; h = h2;
     }
     if (w <= 0 || h <= 0) return false;
     pass.setViewport(x, y, w, h, minD, maxD);
@@ -637,15 +673,21 @@ export class Executor {
     const pipe = this.res.get(u32[w]) as DrawPipe | undefined;
     if (!pipe?.pipeline) { this.stats.skipped++; return; }
     const colors = [u32[w + 1], u32[w + 2], u32[w + 3], u32[w + 4]], colorCount = u32[w + 5], depth = u32[w + 6];
+    const textureCount = u32[w + 30], bw = w + 31;
+    // Depth textures it samples: their r32float copies, made (outside the render pass) before it opens.
+    for (const n of pipe.textures) {
+      if (n >= textureCount) continue;
+      const t = this.tex(u32[bw + 6 * n]);
+      if (t?.info.depth && u32[bw + 6 * n + 1] !== 2) this.depthCopy(u32[bw + 6 * n], t);
+    }
     const size = this.beginPass(colors, colorCount, depth);
     if (!size) { this.stats.skipped++; return; }
     const pass = this.pass!;
-    if (!this.viewportAndScissor(pass, f32, i32, w + 7, w + 13, size)) { this.stats.skipped++; return; }
+    if (!this.viewportAndScissor(pass, f32, i32, w + 7, w + 13, size, u32[w + 22])) { this.stats.skipped++; return; }
     pass.setPipeline(pipe.pipeline);
     pass.setBlendConstant({ r: f32[w + 17], g: f32[w + 18], b: f32[w + 19], a: f32[w + 20] });
     pass.setStencilReference(u32[w + 21] & 0xFF);
     pass.setBindGroup(0, this.group0, [u32[w + 22], u32[w + 23], u32[w + 24], u32[w + 25]]);
-    const textureCount = u32[w + 30], bw = w + 31;
     const entries: GPUBindGroupEntry[] = [];
     for (const n of pipe.textures) {
       const b = bw + 6 * n;
@@ -654,14 +696,47 @@ export class Executor {
       // Depth and stencil views need other binding types: sampled as the null texture for now. So are
       // 32-bit float textures without float32-filterable: one invalid bind group loses the whole frame.
       const unfilterable = !!t && /32float/.test(t.info.format) && !this.features.has('float32-filterable');
-      const usable = t && !t.info.depth && kind === 0 && !unfilterable;
-      if (t && !usable) this.warn(`view:${t.info.format}:${kind}`, `a draw samples a ${t.info.format} texture (view ${kind}) it can't bind here: the null texture instead (to do)`);
-      entries.push({ binding: n, resource: this.view(usable ? t : this.nullTex, 0) });
+      let resource: GPUTextureView;
+      if (t?.info.depth && kind !== 2 && this.depthCopies.has(u32[b])) resource = this.depthCopies.get(u32[b])!.view;
+      else if (t && !t.info.depth && kind === 0 && !unfilterable) resource = this.view(t, 0);
+      else {
+        if (t) this.warn(`view:${t.info.format}:${kind}`, `a draw samples a ${t.info.format} texture (view ${kind}) it can't bind here: the null texture instead`);
+        resource = this.view(this.nullTex, 0);
+      }
+      entries.push({ binding: n, resource });
       entries.push({ binding: 32 + n, resource: this.sampler(u8.slice((b + 2) * 4, (b + 2) * 4 + 16)) });
     }
     if (pipe.textures.length) pass.setBindGroup(1, this.dev.createBindGroup({ layout: pipe.group1, entries }));
     pass.setIndexBuffer(this.ring, 'uint32');
     pass.drawIndexed(u32[w + 29], 1, u32[w + 28]);
+  }
+
+  /** Depth texture `id` -> its r32float copy (depthCopies), unless the copy is up to date. */
+  private depthCopy(id: number, t: Tex) {
+    let c = this.depthCopies.get(id);
+    if (c && c.gen === (t.gen ?? 0)) return;
+    if (!this.features.has('float32-filterable')) {
+      this.warn('depthcopy', 'depth textures sampled by draws need float32-filterable: the null texture instead');
+      return;
+    }
+    if (!c || c.texture.width !== t.width || c.texture.height !== t.height) {
+      c?.texture.destroy();
+      const texture = this.dev.createTexture({ size: [t.width, t.height], format: 'r32float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING, label: `depth copy ${id}` });
+      c = { gen: -1, texture, view: texture.createView() };
+      this.depthCopies.set(id, c);
+    }
+    this.depthCopyPipe ??= this.dev.createRenderPipeline({ label: 'depth copy', layout: 'auto',
+      vertex: { module: this.dev.createShaderModule({ code: FULLSCREEN_VS }), entryPoint: 'main' },
+      fragment: { module: this.dev.createShaderModule({ code: DEPTH_COPY_PS }), entryPoint: 'main', targets: [{ format: 'r32float' }] } });
+    this.endPass();
+    const pass = this.encoder().beginRenderPass({ colorAttachments: [{ view: c.view, loadOp: 'clear', storeOp: 'store', clearValue: { r: 1, g: 0, b: 0, a: 1 } }] });
+    pass.setPipeline(this.depthCopyPipe);
+    pass.setBindGroup(0, this.dev.createBindGroup({ layout: this.depthCopyPipe.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: this.view(t, 1) }] }));
+    pass.draw(3);
+    pass.end();
+    c.gen = t.gen ?? 0;
   }
 
   private drawPass(u32: Uint32Array, f32: Float32Array, i32: Int32Array, w: number) {

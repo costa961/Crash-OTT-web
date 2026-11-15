@@ -36,6 +36,12 @@ DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLO
   -DSIMDE_FLOAT16_API=SIMDE_FLOAT16_API_PORTABLE -DCRASH_WEB=1 -DNOMINMAX"
 COMMON="$TARGET $OPT $FEAT $DEFS -include $ROOT/runtime/compat/wasm_compat.h -fno-delete-null-pointer-checks -fno-strict-aliasing -g0"
 INC_RT="-I$ROOT/runtime/compat -I$ROOT/runtime -I$CPC -I$GEN -I$SIMDE/simde -I$SIMDE"
+# FFmpeg's WMA Pro decoder (tools/ffmpeg_wasm.sh), when built: the XMA decoder then makes sound.
+FFMPEG_LIBS=""
+if [ -f "$ROOT/out/ffmpeg/lib/libavcodec.a" ]; then
+  INC_RT="$INC_RT -DCRASH_HAVE_FFMPEG=1 -I$ROOT/out/ffmpeg/include"
+  FFMPEG_LIBS="$ROOT/out/ffmpeg/lib/libavcodec.a $ROOT/out/ffmpeg/lib/libavutil.a"
+fi
 INC_XU="-I$XU/XenonUtils -I$XU/thirdparty/libmspack/libmspack/mspack -I$XU/thirdparty/tiny-AES-c -I$XU/thirdparty/TinySHA1 -I$SIMDE -DNOMINMAX -w"
 
 compile() { # kind path
@@ -67,11 +73,13 @@ grep -Ev '^\s*(#|$)' web/runtime.txt | xargs -P "$J" -L 1 bash -c 'compile "$0" 
 [ -n "$(ls "$OUT"/obj/*.o 2>/dev/null)" ] || { echo "out/web/obj empty: run tools/wasm_recomp.sh"; exit 1; }
 
 # ---- link ----
-"$WASI/bin/clang++" $TARGET $OPT $FEAT -o "$OUT/crashott.wasm" "$OUT"/obj/*.o "$OUT"/rt/*.o \
+# Only the objects of the sources listed now (a source taken out of web/runtime.txt leaves a stale .o).
+RT_OBJS="$(grep -Ev '^\s*(#|$)' web/runtime.txt | while read -r kind rel; do echo "$OUT/rt/${kind}_$(echo "$rel" | tr '/' '_').o"; done)"
+"$WASI/bin/clang++" $TARGET $OPT $FEAT -o "$OUT/crashott.wasm" "$OUT"/obj/*.o $RT_OBJS \
   -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=4294967296 \
   -Wl,--initial-memory=$(( INITIAL_MB * 1048576 )) \
   -Wl,-z,stack-size=$(( 1 * 1048576 )) \
   -Wl,--export=crashott_runtime_end,--export=malloc,--export=free \
-  -Wl,--error-limit=0 -lsetjmp -lwasi-emulated-mman -lwasi-emulated-signal \
+  $FFMPEG_LIBS -Wl,--error-limit=0 -lsetjmp -lwasi-emulated-mman -lwasi-emulated-signal \
   -lwasi-emulated-process-clocks -lwasi-emulated-getpid 2>&1 | tee "$OUT/link.log" | grep -v "^$" | head -60
 [ -f "$OUT/crashott.wasm" ] && echo "[wasm_runtime] out/web/crashott.wasm $(du -h "$OUT/crashott.wasm" | cut -f1)"

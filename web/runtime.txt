@@ -80,7 +80,8 @@ cpc audio/audio_output.cpp
 cpc audio/audio_override.cpp
 cpc audio/game_volumes.cpp
 cpc audio/wav_writer.cpp
-web audio_device_null.cpp
+web audio_device_web.cpp
+web ffmpeg_wasm.cpp
 web mmio_wasm.cpp
 
 # Controllers (the page's gamepads and keyboard) and the XConfig / region / language answers

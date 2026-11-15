@@ -6,7 +6,7 @@
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
 import { Executor } from './gpu/executor';
 import { attachInput } from './input';
-import { cacheState, fmtBytes } from './host/gamecache';
+import { cacheState, fmtBytes, LANGUAGES } from './host/gamecache';
 import type { FromDownload } from './host/download-worker';
 
 const statusEl = document.getElementById('status') as HTMLDivElement;
@@ -17,8 +17,32 @@ const play = document.getElementById('play') as HTMLButtonElement;
 const q = new URLSearchParams(location.search);
 
 const status = (s: string) => { statusEl.textContent = s; };
-const log = (s: string) => console.log(s);
-const fail = (s: string) => { console.error(s); status(s); };
+// The log: the console, and a buffer the Log button saves to a file (to report a problem).
+const lines: string[] = [];
+const keep = (s: string) => {
+  lines.push(`${(performance.now() / 1000).toFixed(3).padStart(10)} ${s}`);
+  if (lines.length > 200000) lines.splice(0, 50000);
+};
+const log = (s: string) => { console.log(s); keep(s); };
+const fail = (s: string) => { console.error(s); keep(s); status(s); };
+(document.getElementById('logBtn') as HTMLButtonElement).onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([`${navigator.userAgent}\n${location.href}\n\n${lines.join('\n')}\n`], { type: 'text/plain' }));
+  a.download = `crashott-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+};
+
+// The language: remembered in this browser; the game reads it at start (CRASHOTT_LANGUAGE).
+const languageSel = document.getElementById('language') as HTMLSelectElement;
+for (const [id, name] of LANGUAGES) languageSel.add(new Option(name, id));
+let savedLanguage = 'english';
+try { savedLanguage = localStorage.getItem('crashott-language') ?? 'english'; } catch { /* no storage */ }
+languageSel.value = LANGUAGES.some(([id]) => id === savedLanguage) ? savedLanguage : 'english';
+languageSel.onchange = () => {
+  try { localStorage.setItem('crashott-language', languageSel.value); } catch { /* no storage */ }
+  void showData();
+};
 
 async function gpu(): Promise<GPUDevice> {
   if (!navigator.gpu) throw new Error('This browser has no WebGPU (use a recent Chrome or Edge).');
@@ -41,7 +65,7 @@ async function gpu(): Promise<GPUDevice> {
   return device;
 }
 
-async function start() {
+async function start(audio: AudioContext) {
   if (!crossOriginIsolated) throw new Error('The page is not cross-origin isolated (serve it with tools/serve.mjs).');
   status('Loading the game module...');
   const device = await gpu();
@@ -53,6 +77,7 @@ async function start() {
   ctl[C_TID] = 1;
   const env: Record<string, string> = {};
   for (const kv of q.getAll('env')) { const [k, ...v] = kv.split('='); env[k] = v.join('='); }
+  env.CRASHOTT_LANGUAGE ??= languageSel.value;
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
@@ -70,6 +95,15 @@ async function start() {
             catch (e) { fail(String(e)); }
             break;
           case 'input': attachInput(memory, m.block, log); break;
+          case 'audio':
+            audio.audioWorklet.addModule(new URL('./audio-worklet.js', import.meta.url)).then(() => {
+              const node = new AudioWorkletNode(audio, 'crash-audio', { numberOfInputs: 0, outputChannelCount: [2],
+                processorOptions: { buffer: memory.buffer, ring: m.ring } });
+              node.connect(audio.destination);
+              void audio.resume();
+              log(`[audio] AudioWorklet playing at ${audio.sampleRate} Hz`);
+            }).catch(e => log(`[audio] no sound: ${String(e)}`));
+            break;
           case 'trap': fail(`The game stopped (thread ${m.tid}): ${m.message}`); console.error(m.stack); executor?.stop(); break;
           case 'exit': status(`The game exited (${m.code}).`); executor?.stop(); break;
         }
@@ -95,7 +129,7 @@ let downloader: Worker | null = null;
 
 async function showData() {
   try {
-    const { have, total } = await cacheState();
+    const { have, total } = await cacheState(languageSel.value);
     if (have >= total && total > 0) {
       dataText.textContent = `Game data downloaded (${fmtBytes(total)}): loads run from the browser's storage.`;
       downloadBtn.hidden = true;
@@ -116,7 +150,7 @@ downloadBtn.onclick = async () => {
   await navigator.storage.persist?.().catch(() => false);
   // enough room in the browser's storage for what is left?
   try {
-    const [{ have, total }, est] = await Promise.all([cacheState(), navigator.storage.estimate()]);
+    const [{ have, total }, est] = await Promise.all([cacheState(languageSel.value), navigator.storage.estimate()]);
     const free = (est.quota ?? 0) - (est.usage ?? 0);
     if (est.quota && free < total - have) {
       dataText.textContent = `Not enough room in the browser's storage: ${fmtBytes(total - have)} needed, ${fmtBytes(Math.max(0, free))} available.`;
@@ -125,11 +159,12 @@ downloadBtn.onclick = async () => {
   } catch { /* no estimate: try anyway */ }
   downloader = new Worker(new URL('./host/download-worker.js', import.meta.url), { type: 'module', name: 'download' });
   play.disabled = true;
+  languageSel.disabled = true;
   dataBar.hidden = false;
   downloadBtn.textContent = 'Stop';
   const finish = (text?: string) => {
     downloader?.terminate(); downloader = null;
-    play.disabled = false; dataBar.hidden = true;
+    play.disabled = false; languageSel.disabled = false; dataBar.hidden = true;
     void showData().then(() => { if (text) dataText.textContent = text; });
   };
   downloader.onmessage = (ev: MessageEvent<FromDownload>) => {
@@ -141,11 +176,14 @@ downloadBtn.onclick = async () => {
     else if (m.t === 'stopped') finish();
     else if (m.t === 'error') finish(`Download failed: ${m.msg}`);
   };
-  downloader.postMessage({ t: 'start' });
+  downloader.postMessage({ t: 'start', language: languageSel.value });
 };
 void showData();
 
 play.onclick = () => {
   play.disabled = true;
-  start().catch(e => { fail(String(e?.message ?? e)); play.disabled = false; });
+  languageSel.disabled = true;
+  // Created in the click: browsers only let a page start sound from a user gesture.
+  const audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+  start(audio).catch(e => { fail(String(e?.message ?? e)); play.disabled = false; });
 };

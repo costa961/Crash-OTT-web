@@ -9,7 +9,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(HERE, 'dist');
 const watch = process.argv.includes('--watch');
 const opts = {
-  entryPoints: { 'main': 'src/main.ts', 'host/worker': 'src/host/worker.ts', 'host/download-worker': 'src/host/download-worker.ts' },
+  entryPoints: { 'main': 'src/main.ts', 'host/worker': 'src/host/worker.ts', 'host/download-worker': 'src/host/download-worker.ts',
+    'audio-worklet': 'src/audio-worklet.ts' },
   absWorkingDir: HERE, outdir: DIST, bundle: true, format: 'esm', target: ['chrome131'], sourcemap: true,
   minify: !watch, logLevel: 'info',
 };

@@ -37,7 +37,10 @@ docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src crash
 # 4. C++ -> wasm objects (out/web/obj)
 docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_recomp.sh
 
-# 5. Runtime + link -> out/web/crashott.wasm
+# 5. Audio decoder (FFmpeg's WMA Pro, built from source; optional: without it the game is silent)
+docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/ffmpeg_wasm.sh
+
+# 5b. Runtime + link -> out/web/crashott.wasm
 docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_runtime.sh
 
 # Headless boot test under Node (no graphics yet)

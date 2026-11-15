@@ -8,7 +8,7 @@
 //                 | { t: 'stopped' } | { t: 'error', msg }
 import { cacheDir, cacheName, readComplete, writeComplete, MANIFEST_URL, wantedFiles, type GameFile } from './gamecache';
 
-export type ToDownload = { t: 'start' } | { t: 'stop' };
+export type ToDownload = { t: 'start'; language: string } | { t: 'stop' };
 export type FromDownload =
   | { t: 'progress'; have: number; total: number; file: string }
   | { t: 'done'; have: number; total: number }
@@ -17,11 +17,11 @@ export type FromDownload =
 const post = (m: FromDownload) => (self as unknown as Worker).postMessage(m);
 let abort: AbortController | null = null;
 
-async function download() {
+async function download(language: string) {
   abort = new AbortController();
   const r = await fetch(MANIFEST_URL, { cache: 'no-cache', signal: abort.signal });
   if (!r.ok) throw new Error(`the list of game files did not load (HTTP ${r.status})`);
-  const files = wantedFiles(((await r.json()) as { files: GameFile[] }).files);
+  const files = wantedFiles(((await r.json()) as { files: GameFile[] }).files, language);
   const dir = await cacheDir();
   const complete = await readComplete(dir);
   const total = files.reduce((a, f) => a + f.s, 0);
@@ -73,7 +73,7 @@ async function download() {
 
 self.onmessage = (ev: MessageEvent<ToDownload>) => {
   if (ev.data.t === 'stop') { abort?.abort(); return; }
-  download().catch(e => {
+  download(ev.data.language).catch(e => {
     if (abort?.signal.aborted) post({ t: 'stopped' });
     else post({ t: 'error', msg: String((e as Error)?.message ?? e) });
   });

@@ -9,6 +9,7 @@
 #include "kernel/kernel.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 __attribute__((import_module("crashott"), import_name("input_register"))) extern "C" void crashott_input_register(uint32_t block);
@@ -33,6 +34,23 @@ namespace
         uint32_t sequence;  // odd while the page writes
         WebPad pads[4];
     };
+
+    // The game's languages: XConfig language and country (Dutch is chosen by the country), as
+    // crashott-pc's settings.cpp; the page picks one (CRASHOTT_LANGUAGE, web/src/main.ts).
+    struct Language { const char* id; uint32_t xconfig; uint8_t country; };
+    constexpr Language LANGUAGES[] = { { "english", 1, 103 }, { "french", 4, 34 }, { "german", 3, 24 },
+                                       { "spanish", 5, 31 }, { "italian", 6, 50 }, { "dutch", 1, 74 } };
+    const Language& CurrentLanguage()
+    {
+        static const Language* language = [] {
+            const char* id = getenv("CRASHOTT_LANGUAGE");
+            for (const Language& l : LANGUAGES)
+                if (id && !strcmp(id, l.id))
+                    return &l;
+            return &LANGUAGES[0];
+        }();
+        return *language;
+    }
 
     WebInput g_input{ 0x504E4957u, 0, {} };
     std::atomic<bool> g_registered;
@@ -152,15 +170,15 @@ PPC_FUNC(__imp__XGetGameRegion)
     ctx.r3.u64 = 0xFFFF;
 }
 
-// u32 XGetLanguage(): English (XConfig language 1).
+// u32 XGetLanguage(): the language the page picked.
 PPC_FUNC(__imp__XGetLanguage)
 {
     KERNEL_IMPORT_ENTER(XGetLanguage);
-    ctx.r3.u64 = 1;
+    ctx.r3.u64 = CurrentLanguage().xconfig;
 }
 
 // NTSTATUS ExGetXConfigSetting(u16 Category, u16 Setting, void* Buffer, u16 BufferSize, u16* RequiredSize)
-// User category values as crashott-pc's (from Xenia's xboxkrnl_xconfig.cc), English / US.
+// User category values as crashott-pc's (from Xenia's xboxkrnl_xconfig.cc), with the page's language.
 PPC_FUNC(__imp__ExGetXConfigSetting)
 {
     KERNEL_IMPORT_ENTER(ExGetXConfigSetting);
@@ -172,11 +190,11 @@ PPC_FUNC(__imp__ExGetXConfigSetting)
     {
         switch (setting)
         {
-        case 0x0009: size = 4; value[3] = 1; break;      // language: English
+        case 0x0009: size = 4; value[3] = uint8_t(CurrentLanguage().xconfig); break;  // language
         case 0x000A: size = 4; value[1] = 0x04; break;   // video flags: widescreen (0x00040000)
         case 0x000B: size = 4; break;                    // audio flags
         case 0x000C: size = 4; value[3] = 0x40; break;   // retail flags
-        case 0x000E: size = 1; value[0] = 103; break;    // country: US
+        case 0x000E: size = 1; value[0] = CurrentLanguage().country; break;     // country
         case 0x000F: size = 1; value[0] = 0; break;      // parental control
         default: break;
         }

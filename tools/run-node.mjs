@@ -332,7 +332,8 @@ if (isMainThread) {
     // The WebGPU recorder's control block (runtime/gpu_web/webgpu_proto.h): no page here, so it
     // stays detached and the recorder drops its records.
     gpu_register: () => 0,
-    input_register: () => {},   // no controllers here: every pad reads as connected with nothing pressed
+    input_register: () => {},
+    audio_register: () => {},   // no page: the device drops the frames at the real rate   // no controllers here: every pad reads as connected with nothing pressed
     now_ms: () => T0 + performance.now(),
     blocked_ms: () => blockedMs,
   };

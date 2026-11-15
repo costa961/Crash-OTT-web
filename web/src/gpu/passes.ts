@@ -135,3 +135,10 @@ export const DRAW_PS: Record<string, string> = {
 /** Rectangle clears (WgClear with a rect): the colour comes from the blend constant. */
 export const CLEAR_COLOR_PS = /* wgsl */ `
 @fragment fn main() -> @location(0) vec4f { return vec4f(1.0); }`;
+
+/** A depth texture into an r32float copy (executor.ts depthCopy): what draws sample as "depth". */
+export const DEPTH_COPY_PS = /* wgsl */ `
+@group(0) @binding(0) var depth : texture_depth_2d;
+@fragment fn main(@builtin(position) p : vec4f) -> @location(0) vec4f {
+  return vec4f(textureLoad(depth, vec2i(p.xy), 0), 0.0, 0.0, 1.0);
+}`;

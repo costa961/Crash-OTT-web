@@ -19,6 +19,10 @@
   #dataText { color: var(--muted); font-size: 14px; margin: 0; }
   button.secondary { background: transparent; color: var(--fg); border: 1px solid #3a3a42; font-weight: 500; padding: 8px 20px; }
   .keys { font-size: 13px; }
+  #langRow { color: var(--muted); font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  select { font: inherit; background: #1a1a1f; color: var(--fg); border: 1px solid #3a3a42; border-radius: 6px; padding: 4px 8px; }
+  #logBtn { position: fixed; top: 10px; right: 12px; z-index: 5; padding: 4px 12px; font-size: 13px; opacity: 0.55; }
+  #logBtn:hover { opacity: 1; }
   #status { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 13px; white-space: pre-wrap; max-width: calc(100% - 24px); }
 </style>
 </head>
@@ -28,6 +32,7 @@
   <h1>Crash of the Titans</h1>
   <p>The Xbox 360 game, recompiled to WebAssembly from your own copy. Unofficial, work in progress.</p>
   <button id="play">Start</button>
+  <label id="langRow">Language <select id="language"></select></label>
   <div id="data">
     <p id="dataText">Game data: checking...</p>
     <progress id="dataBar" max="1" value="0" hidden></progress>
@@ -36,6 +41,7 @@
   <p class="keys">Gamepad, or keyboard: WASD move · Space jump · J attack · K / I · Q / E triggers · Esc start · arrows menus</p>
 </div>
 <div id="status"></div>
+<button id="logBtn" class="secondary" title="Save the log to a file (to report a problem)">Log</button>
 <script type="module" src="main.js"></script>
 </body>
 </html>
