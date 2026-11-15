@@ -66,16 +66,25 @@ On the start page:
 - **FPS counter**: on/off.
 - **60 FPS mode**: 60 fps instead of the original 30 (crashott-pc's frame limit); needs a fast enough PC.
 - **Controls**: the keyboard bindings, one key per pad input (click one, press the new key; Reset for the
-  defaults below). Enter is always A too.
-- **Graphics**: anti-aliasing (off, FXAA, SMAA) and crashott-pc's motion blur, depth of field and shadow
+  defaults below; Enter is always A too), and on the Gamepad tab which gamepad button is which pad input
+  (click one, press the button).
+- **Graphics**: the internal resolution (720p, the original, up to 4K) and aspect ratio (the screen's, or
+  16:9, 16:10, 21:9, 32:9, 4:3: wider shows more to the sides), the 60 FPS mode, anti-aliasing (off, FXAA, SMAA)
+  and crashott-pc's motion blur, depth of field and shadow
   softness (0-200 %, 100 % = the game's own look); its lighting remaster: ambient occlusion (off, low, high),
   indirect light (GI) and its intensity, contact shadows, soft shadows (all off = the game's own look).
+- **Export saves / Import saves**: your saves into a .zip file, and back (a backup, or to move them to
+  another browser; importing replaces saves of the same name).
 - **Download logs**: the log of the last session and of this one (to report a problem).
 
-A browser that lacks something the game needs (WebGPU, cross-origin isolation, WebAssembly exception
-handling) is told so on the start page, and Start stays off.
+A browser that lacks something the game needs (WebGPU and an adapter for it, cross-origin isolation,
+WebAssembly exception handling, the browser's file storage) is told so on the start page, and Start stays off.
+Chrome and Edge are what the game is tested with. Firefox has WebGPU on Windows only (Firefox 141 and later)
+and is untested there; Safari is untested.
 
-In game: **F** or a double-click toggles full screen (F11 works too). Switching to another tab or minimizing
+In game: **F2** opens the Graphics options over the game (the game pauses; changes apply when you close
+them, a new resolution included). **F** or a double-click toggles full screen (F11 works too); the picture is
+drawn at the window's (or the screen's) own resolution. Switching to another tab or minimizing
 the window pauses the game until you come back. **Hold B, Start or A** (keyboard: K, Esc, Space / Enter) for a
 moment to skip a cutscene or an intro video: a prompt at the bottom right fills while you hold.
 
@@ -92,8 +101,8 @@ Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the k
 | Start / Back | Esc / Tab |
 | Right stick | numpad 8 4 5 6 |
 
-Saves stay in the browser (its storage for this site); the first start copies the saves an older build left
-on the local server (`out/userdata/content`).
+Saves stay in the browser (its storage for this site; Export saves for a copy); the first start copies the
+saves an older build left on the local server (`out/userdata/content`).
 
 ## Legal
 

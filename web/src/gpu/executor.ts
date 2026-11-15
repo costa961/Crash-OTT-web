@@ -94,6 +94,8 @@ export class Executor {
   private stats = { frames: 0, draws: 0, skipped: 0, passes: 0, errors: 0 };
   private presentFormat: GPUTextureFormat;
   private running = true;
+  /** the canvas's next size in pixels (resize), applied between two animation frames */
+  private wantedSize: [number, number] | null = null;
   private emptyFs: GPUShaderModule | null = null;
   private presentLogs = 0;
   /** Depth textures sampled by draws, as r32float copies (WebGPU can't bind a depth view where the
@@ -164,7 +166,7 @@ export class Executor {
     Atomics.store(ctl.i32, CTL.attached, 1);
     Atomics.notify(ctl.i32, CTL.attached);
     this.log(`[webgpu] executor attached: ring ${uploadSize >> 20} MB, features ${[...this.features].join(' ')}`);
-    const frame = () => { if (!this.running) return; this.run(10); requestAnimationFrame(frame); };
+    const frame = () => { if (!this.running) return; this.applySize(); this.run(10); requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
     setInterval(() => {
       const s = this.stats;
@@ -327,6 +329,26 @@ export class Executor {
     if (this.offscreen) return this.offscreen.view;
     if (!this.backView) this.backView = this.ctx.getCurrentTexture().createView();
     return this.backView;
+  }
+
+  /** The canvas's size in pixels: the page's size (full screen: the screen's resolution). The runtime
+   *  reads it from the control block at its next frame (window::GetClientSize) and draws its picture at
+   *  that size, between black bars. Not with ?offscreen=1 (a fixed back buffer). */
+  resize(width: number, height: number) {
+    if (!this.offscreen && width > 0 && height > 0) this.wantedSize = [Math.round(width), Math.round(height)];
+  }
+
+  private applySize() {
+    const size = this.wantedSize;
+    if (!size) return;
+    this.wantedSize = null;
+    const canvas = this.ctx.canvas as HTMLCanvasElement;
+    if (canvas.width === size[0] && canvas.height === size[1]) return;
+    canvas.width = size[0]; canvas.height = size[1];
+    this.backView = null;
+    const ctl = this.ctl();
+    Atomics.store(ctl.i32, CTL.canvasWidth, size[0]);
+    Atomics.store(ctl.i32, CTL.canvasHeight, size[1]);
   }
 
   /** ?offscreen=1: the back buffer to the 2D canvas, at most twice a second. */

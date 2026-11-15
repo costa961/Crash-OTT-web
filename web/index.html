@@ -55,6 +55,9 @@
   .dlgbar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
   .dlgnote { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   .setting { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 14px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab { padding: 4px 14px; font-weight: 500; background: transparent; color: var(--muted); border: 1px solid #3a3a42; }
+  .tab.active { color: var(--fg); border-color: var(--accent); }
   dialog h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); font-weight: 600; }
   .setting-switch { justify-content: space-between; margin: 6px 0; }
   .setting input[type="range"] { grid-column: 1 / -1; accent-color: var(--accent); }
@@ -80,17 +83,40 @@
     <button id="controlsBtn" class="secondary">Controls</button>
     <button id="graphicsBtn" class="secondary">Graphics</button>
   </div>
-  <p class="keys">A gamepad, or the keyboard (see Controls) · F or double-click: full screen</p>
+  <div class="row">
+    <button id="exportSaves" class="secondary" title="Your saves, from this browser's storage, into a .zip file">Export saves</button>
+    <button id="importSaves" class="secondary" title="Saves from a .zip file (Export saves) into this browser">Import saves</button>
+    <input type="file" id="savesFile" accept=".zip,application/zip" hidden>
+  </div>
+  <p id="savesText" class="keys" hidden></p>
+  <p class="keys">A gamepad, or the keyboard (see Controls) · F or double-click: full screen · F2: options in game</p>
   <button id="logs" title="The log of the last session and this one, to report a problem">Download logs</button>
 </div>
 <dialog id="controlsDlg">
-  <h2>Keyboard controls</h2>
-  <div class="keytable" id="keytable"></div>
-  <p class="dlgnote">Click a key, then press the new one (Esc cancels). Enter is always A too. A gamepad needs no setup.</p>
+  <h2>Controls</h2>
+  <div class="tabs" role="tablist">
+    <button id="tabKeys" class="tab active" role="tab">Keyboard</button>
+    <button id="tabPad" class="tab" role="tab">Gamepad</button>
+  </div>
+  <div id="keysPane">
+    <div class="keytable" id="keytable"></div>
+    <p class="dlgnote">Click a key, then press the new one (Esc cancels). Enter is always A too.</p>
+  </div>
+  <div id="padPane" hidden>
+    <div class="keytable" id="padtable"></div>
+    <p class="dlgnote" id="padNote">Click an input, then press the gamepad button for it (Esc cancels). The sticks stay as they are.</p>
+  </div>
   <div class="dlgbar"><button id="keysReset" class="secondary">Reset</button><button id="keysDone">Done</button></div>
 </dialog>
 <dialog id="graphicsDlg">
   <h2>Graphics</h2>
+  <label class="setting">Resolution <select id="optRes">
+    <option value="720">720p (original)</option><option value="900">900p</option><option value="1080">1080p</option>
+    <option value="1440">1440p</option><option value="2160">2160p (4K)</option></select></label>
+  <label class="setting">Aspect ratio <select id="optAspect">
+    <option value="auto">Screen's</option><option value="16:9">16:9 (original)</option><option value="16:10">16:10</option>
+    <option value="21:9">21:9</option><option value="32:9">32:9</option><option value="4:3">4:3</option></select></label>
+  <label class="switch setting-switch">60 FPS mode <input type="checkbox" id="opt60g" role="switch"></label>
   <label class="setting">Anti-aliasing <select id="optAa"><option value="off">Off</option><option value="fxaa">FXAA</option><option value="smaa">SMAA</option></select></label>
   <label class="setting">Motion blur <output id="mbVal"></output><input type="range" id="optMb" min="0" max="200" step="10"></label>
   <label class="setting">Depth of field <output id="dofVal"></output><input type="range" id="optDof" min="0" max="200" step="10"></label>
@@ -101,7 +127,8 @@
   <label class="setting">GI intensity <output id="giVal"></output><input type="range" id="optGiI" min="0" max="200" step="10"></label>
   <label class="switch setting-switch">Contact shadows <input type="checkbox" id="optContact" role="switch"></label>
   <label class="switch setting-switch">Soft shadows <input type="checkbox" id="optSoft" role="switch"></label>
-  <p class="dlgnote">100% and everything off is the game's own look. Applied when the game starts.</p>
+  <p class="dlgnote" id="gfxNote">720p, 16:9, 100% and everything off is the game's own look. Higher resolutions are sharper and
+    cost more GPU time; wider aspect ratios show more to the sides.</p>
   <div class="dlgbar"><button id="gfxReset" class="secondary">Reset</button><button id="gfxDone">Done</button></div>
 </dialog>
 <div id="status"></div>

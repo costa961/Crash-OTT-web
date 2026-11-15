@@ -7,14 +7,23 @@
 // The block (WebInput, registered with the host through crashott.input_register): a sequence word
 // the page makes odd while it writes and even when done, four WebPad entries, then the page's
 // visibility (nonzero while the page is hidden: the game is held, gpu/window.h Suspended), then whether
-// a cutscene or an intro video can be skipped (written here, for the page's "hold to skip" prompt).
+// a cutscene or an intro video can be skipped (written here, for the page's "hold to skip" prompt), then
+// the graphics options the page's in-game panel changed: "NAME=value" lines (main_wasm.cpp
+// ApplyGraphicsOptions), applied at the next XamInputGetState when their sequence number changes.
 #include "kernel/kernel.h"
 #include "settings/direct_boot.h"
 #include "settings/skip_cinematics.h"
 
 #include <atomic>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
+
+void ApplyGraphicsOptions(const std::function<const char*(const char*)>& get, bool live);  // main_wasm.cpp
 
 __attribute__((import_module("crashott"), import_name("input_register"))) extern "C" void crashott_input_register(uint32_t block);
 
@@ -39,6 +48,9 @@ namespace
         WebPad pads[4];
         uint32_t hidden;    // the page is hidden (another tab, minimized)
         uint32_t skippable; // written here: a cutscene or an intro video can be skipped (the page's prompt)
+        uint32_t optionsSequence;  // the page adds 1 once it has written options / optionsLength
+        uint32_t optionsLength;
+        char options[1024];        // "NAME=value" lines, the start page's names (CRASHOTT_AA=smaa...)
     };
 
     // The game's languages: XConfig language and country (Dutch is chosen by the country), as
@@ -58,7 +70,38 @@ namespace
         return *language;
     }
 
-    WebInput g_input{ 0x504E4957u, 0, {}, 0, 0 };
+    WebInput g_input{ 0x504E4957u, 0, {}, 0, 0, 0, 0, {} };
+    uint32_t g_optionsSeen;
+
+    // The options the page's panel changed, once per new sequence number.
+    void ApplyPageOptions()
+    {
+        uint32_t sequence = __atomic_load_n(&g_input.optionsSequence, __ATOMIC_ACQUIRE);
+        if (sequence == g_optionsSeen)
+            return;
+        g_optionsSeen = sequence;
+        uint32_t length = std::min<uint32_t>(__atomic_load_n(&g_input.optionsLength, __ATOMIC_ACQUIRE), sizeof(g_input.options));
+        std::string text(g_input.options, length);
+        std::vector<std::pair<std::string, std::string>> options;
+        size_t at = 0;
+        while (at < text.size())
+        {
+            size_t end = text.find('\n', at);
+            if (end == std::string::npos)
+                end = text.size();
+            std::string line = text.substr(at, end - at);
+            size_t equals = line.find('=');
+            if (equals != std::string::npos)
+                options.emplace_back(line.substr(0, equals), line.substr(equals + 1));
+            at = end + 1;
+        }
+        ApplyGraphicsOptions([&](const char* name) -> const char* {
+            for (const auto& [key, value] : options)
+                if (key == name)
+                    return value.c_str();
+            return nullptr;
+        }, true);
+    }
     std::atomic<bool> g_registered;
     uint32_t g_packet[4];
     WebPad g_last[4];
@@ -146,6 +189,7 @@ PPC_FUNC(__imp__XamInputGetState)
         cutscenes::FilterGameInput(gamepad, true);
         pad.buttons = gamepad.wButtons;
         __atomic_store_n(&g_input.skippable, cutscenes::SkipPossible() ? 1u : 0u, __ATOMIC_RELEASE);
+        ApplyPageOptions();
     }
     // The packet number changes with the state, as XInput's does.
     if (memcmp(&pad.buttons, &g_last[user].buttons, 12) != 0)

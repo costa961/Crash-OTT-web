@@ -2,16 +2,44 @@
 // layout) and the keyboard as a pad, written once per animation frame into the block the runtime
 // reads (runtime/input_wasm.cpp: WebInput). Pad 0 is the first gamepad merged with the keyboard.
 //
-// The keyboard bindings are the player's (the start page's Controls, remembered in this browser):
-// one key per pad input; Enter is always A too (the menus).
+// The bindings are the player's (the start page's Controls, remembered in this browser): one key per
+// pad input (Enter is always A too, for the menus), and which gamepad button is which pad input.
 
 // XINPUT_GAMEPAD_* bits
 const B = { UP: 0x0001, DOWN: 0x0002, LEFT: 0x0004, RIGHT: 0x0008, START: 0x0010, BACK: 0x0020, LS: 0x0040, RS: 0x0080,
   LB: 0x0100, RB: 0x0200, A: 0x1000, BB: 0x2000, X: 0x4000, Y: 0x8000 } as const;
 
-// "standard" gamepad buttons -> XInput bits (6/7 are the triggers, 16 the guide button)
-const PAD_BUTTONS: Record<number, number> = { 0: B.A, 1: B.BB, 2: B.X, 3: B.Y, 4: B.LB, 5: B.RB, 8: B.BACK, 9: B.START,
-  10: B.LS, 11: B.RS, 12: B.UP, 13: B.DOWN, 14: B.LEFT, 15: B.RIGHT };
+// ---- the gamepad: which "standard" button (0-15; 6 / 7 are the triggers) is which pad input ----
+/** The gamepad's pad inputs, in the order the Controls table shows them (the sticks are not remapped). */
+export const PAD_ACTIONS = [
+  ['a', 'A (jump)'], ['x', 'X (attack)'], ['b', 'B'], ['y', 'Y'],
+  ['lb', 'LB'], ['rb', 'RB'], ['lt', 'LT'], ['rt', 'RT'],
+  ['start', 'Start'], ['back', 'Back'],
+  ['up', 'D-pad up'], ['down', 'D-pad down'], ['left', 'D-pad left'], ['right', 'D-pad right'],
+  ['ls', 'Left stick click'], ['rs', 'Right stick click'],
+] as const;
+export type PadAction = typeof PAD_ACTIONS[number][0];
+export type PadBindings = Record<PadAction, number>;   // pad input -> Gamepad.buttons index
+export const DEFAULT_PAD: PadBindings = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, back: 8, start: 9, ls: 10, rs: 11,
+  up: 12, down: 13, left: 14, right: 15 };
+const PAD_KEY = 'crashott-pad';
+export function loadPadBindings(): PadBindings {
+  const b: PadBindings = { ...DEFAULT_PAD };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PAD_KEY) ?? '{}') as Partial<PadBindings>;
+    for (const [a] of PAD_ACTIONS) if (Number.isInteger(saved[a]) && saved[a]! >= 0 && saved[a]! < 16) b[a] = saved[a]!;
+  } catch { /* defaults */ }
+  return b;
+}
+export function savePadBindings(b: PadBindings) {
+  try { localStorage.setItem(PAD_KEY, JSON.stringify(b)); } catch { /* no storage */ }
+}
+/** A "standard" gamepad button's name, in the Xbox layout. */
+export function padButtonName(i: number): string {
+  return ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'Back', 'Start', 'Left stick', 'Right stick', 'D-pad ↑', 'D-pad ↓', 'D-pad ←', 'D-pad →'][i] ?? `Button ${i}`;
+}
+const PAD_BIT: Record<PadAction, number> = { a: B.A, b: B.BB, x: B.X, y: B.Y, lb: B.LB, rb: B.RB, lt: 0, rt: 0, start: B.START, back: B.BACK,
+  up: B.UP, down: B.DOWN, left: B.LEFT, right: B.RIGHT, ls: B.LS, rs: B.RS };
 
 /** The keyboard's pad inputs, in the order the Controls table shows them. */
 export const ACTIONS = [
@@ -34,8 +62,8 @@ export const DEFAULT_BINDINGS: Bindings = {
 };
 
 const STORAGE_KEY = 'crashott-keys';
-/** Keys the game can't have: the page's own (full screen). */
-export const RESERVED_KEYS = new Set(['KeyF', 'F11', 'F12']);
+/** Keys the game can't have: the page's own (full screen, the in-game options panel). */
+export const RESERVED_KEYS = new Set(['KeyF', 'F11', 'F12', 'F2']);
 
 export function loadBindings(): Bindings {
   const b: Bindings = { ...DEFAULT_BINDINGS };
@@ -66,6 +94,8 @@ const BUTTON_OF: Partial<Record<Action, number>> = { a: B.A, b: B.BB, x: B.X, y:
   up: B.UP, down: B.DOWN, left: B.LEFT, right: B.RIGHT, ls: B.LS, rs: B.RS };
 
 const MAGIC = 0x504E4957, PAD_BYTES = 20, PADS_AT = 8, HIDDEN_AT = PADS_AT + 4 * PAD_BYTES, SKIPPABLE_AT = HIDDEN_AT + 4;
+// the in-game options (runtime/input_wasm.cpp ApplyPageOptions): sequence, length, text
+const OPTIONS_SEQ_AT = SKIPPABLE_AT + 4, OPTIONS_LEN_AT = OPTIONS_SEQ_AT + 4, OPTIONS_AT = OPTIONS_LEN_AT + 4, OPTIONS_BYTES = 1024;
 /** crashott-pc's settings/skip_cinematics.cpp: how long B / START / A is held to skip a cutscene. */
 const SKIP_HOLD_MS = 800;
 
@@ -74,20 +104,34 @@ export interface InputOptions {
   skipPrompt?: HTMLElement | null;
 }
 
-export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: string) => void, opts: InputOptions = {}): () => void {
+export interface GameInput {
+  /** The game held and its input off (the in-game options panel), or running again. */
+  setPaused(paused: boolean): void;
+  /** Graphics options by name (main_wasm.cpp ApplyGraphicsOptions), applied at the game's next frame. */
+  sendOptions(options: Record<string, string>): void;
+  detach(): void;
+}
+
+export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: string) => void, opts: InputOptions = {}): GameInput {
   const bindings = loadBindings();
+  const padBindings = loadPadBindings();
+  let paused = false;
   const keyToActions = new Map<string, Action[]>();
   for (const [a] of ACTIONS) keyToActions.set(bindings[a], [...(keyToActions.get(bindings[a]) ?? []), a]);
   const keys = new Set<string>();
   const handled = (code: string) => keyToActions.has(code) || code === 'Enter' || code === 'NumpadEnter';
-  const down = (e: KeyboardEvent) => { if (handled(e.code)) { keys.add(e.code); e.preventDefault(); } };
+  const down = (e: KeyboardEvent) => { if (!paused && handled(e.code)) { keys.add(e.code); e.preventDefault(); } };
   const up = (e: KeyboardEvent) => { keys.delete(e.code); };
   const blur = () => keys.clear();
   // the page hidden (another tab, minimized): the game holds between two frames (runtime/stubs.cpp)
-  const visibility = () => {
+  // (or the in-game options panel open)
+  const hold = () => {
     const i32 = new Int32Array(memory.buffer as unknown as ArrayBuffer, block, (HIDDEN_AT >> 2) + 1);
-    Atomics.store(i32, HIDDEN_AT >> 2, document.hidden ? 1 : 0);
-    if (document.hidden) keys.clear();
+    Atomics.store(i32, HIDDEN_AT >> 2, document.hidden || paused ? 1 : 0);
+    if (document.hidden || paused) keys.clear();
+  };
+  const visibility = () => {
+    hold();
     log(`[input] page ${document.hidden ? 'hidden: game paused' : 'visible: game running'}`);
   };
   document.addEventListener('visibilitychange', visibility);
@@ -129,10 +173,11 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
     for (let p = 0; p < 4; p++) {
       const g = pads[p];
       let buttons = 0, lt = 0, rt = 0, lx = 0, ly = 0, rx = 0, ry = 0, connected = !!g;
-      if (g) {
-        for (const [i, bit] of Object.entries(PAD_BUTTONS)) if (g.buttons[Number(i)]?.pressed) buttons |= bit;
-        lt = Math.round((g.buttons[6]?.value ?? 0) * 255);
-        rt = Math.round((g.buttons[7]?.value ?? 0) * 255);
+      if (g && !paused) {
+        for (const [a, bit] of Object.entries(PAD_BIT) as [PadAction, number][]) if (bit && g.buttons[padBindings[a]]?.pressed) buttons |= bit;
+        const trigger = (i: number) => { const b = g.buttons[i]; return Math.round((b ? Math.max(b.value, b.pressed ? 1 : 0) : 0) * 255); };
+        lt = trigger(padBindings.lt);
+        rt = trigger(padBindings.rt);
         lx = axis(g.axes[0] ?? 0); ly = -axis(g.axes[1] ?? 0);   // XInput: up is positive
         rx = axis(g.axes[2] ?? 0); ry = -axis(g.axes[3] ?? 0);
       }
@@ -176,11 +221,28 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
   };
   requestAnimationFrame(frame);
   log('[input] keyboard and gamepads attached');
-  return () => {
-    running = false;
-    window.removeEventListener('keydown', down);
-    window.removeEventListener('keyup', up);
-    window.removeEventListener('blur', blur);
-    document.removeEventListener('visibilitychange', visibility);
+  return {
+    setPaused(p: boolean) {
+      if (p === paused) return;
+      paused = p;
+      hold();
+      log(`[input] ${paused ? 'options panel open: game paused' : 'options panel closed: game running'}`);
+    },
+    sendOptions(options: Record<string, string>) {
+      const text = new TextEncoder().encode(Object.entries(options).map(([k, v]) => `${k}=${v}`).join('\n'));
+      if (text.length > OPTIONS_BYTES) { log('[input] the options are too long for the input block'); return; }
+      const buf = memory.buffer as unknown as ArrayBuffer;
+      new Uint8Array(buf, block + OPTIONS_AT, OPTIONS_BYTES).set(text);
+      const i32 = new Int32Array(buf, block, (OPTIONS_LEN_AT >> 2) + 1);
+      Atomics.store(i32, OPTIONS_LEN_AT >> 2, text.length);
+      Atomics.add(i32, OPTIONS_SEQ_AT >> 2, 1);
+    },
+    detach() {
+      running = false;
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+      document.removeEventListener('visibilitychange', visibility);
+    },
   };
 }

@@ -29,6 +29,8 @@ namespace gpu::rhi
 {
     namespace
     {
+        WgCtl* g_ctl;  // the device's control block (CanvasSize)
+
         constexpr uint32_t COMMAND_RING_BYTES = 16u << 20;
         constexpr uint64_t UPLOAD_RING_BYTES = 128ull << 20;
 
@@ -74,6 +76,7 @@ namespace gpu::rhi
                 m_ctl->uploadSize = uint32_t(UPLOAD_RING_BYTES);
                 m_ctl->canvasWidth = info.width;
                 m_ctl->canvasHeight = info.height;
+                g_ctl = m_ctl;
                 m_ring.Init(UPLOAD_RING_BYTES);
 
                 m_backBuffer.id = WG_TEXTURE_BACKBUFFER;
@@ -687,6 +690,14 @@ namespace gpu::rhi
     Device* CreateVulkan(const DeviceInfo& info)
     {
         return new WebGpuDevice(info);
+    }
+
+    // The canvas's size in pixels, as the page last set it (it follows the page's size: full screen
+    // draws at the screen's resolution); 0 x 0 before the executor attaches.
+    void CanvasSize(uint32_t& width, uint32_t& height)
+    {
+        width = g_ctl ? __atomic_load_n(&g_ctl->canvasWidth, __ATOMIC_ACQUIRE) : 0;
+        height = g_ctl ? __atomic_load_n(&g_ctl->canvasHeight, __ATOMIC_ACQUIRE) : 0;
     }
 
     bool TestCompile(Stage, const std::string&, const char*, Layout, const std::filesystem::path&)

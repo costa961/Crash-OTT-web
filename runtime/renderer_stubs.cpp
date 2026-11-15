@@ -72,7 +72,10 @@ namespace gpu::upscaler
     bool Evaluate(const Frame&) { return false; }
 }
 
-// gpu/window.h: the page's canvas is the window (the size comes from the WebGPU device).
+namespace gpu::rhi { void CanvasSize(uint32_t& width, uint32_t& height); }  // rhi_webgpu.cpp
+
+// gpu/window.h: the page's canvas is the window; its size is the canvas's (the renderer's ResizeIfNeeded
+// follows it: the picture between black bars at the canvas's resolution).
 namespace gpu::window
 {
     void* Create(uint32_t, uint32_t, const wchar_t*)
@@ -83,8 +86,9 @@ namespace gpu::window
     bool IsFocused() { return true; }
     void GetClientSize(uint32_t& width, uint32_t& height)
     {
-        width = 1280;
-        height = 720;
+        rhi::CanvasSize(width, height);
+        if (!width || !height)
+            width = 1280, height = 720;
     }
     bool ConsumeScreenshotRequest() { return false; }
     uint32_t ConsumeOverlayToggles() { return 0; }

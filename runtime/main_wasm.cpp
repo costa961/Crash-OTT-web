@@ -14,6 +14,8 @@
 #include "kernel/memory.h"
 #include "kernel/xex_loader.h"
 #include "paths.h"
+#include "gpu/gpu.h"
+#include "gpu/renderer.h"
 #include "settings/settings.h"
 
 #include <algorithm>
@@ -21,11 +23,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <system_error>
 
 extern "C" void crashott_set_args(int argc, char** argv); // platform_wasm.cpp
 
-namespace gpu { void Init(); }
 namespace audio { void Init(); }
 
 namespace
@@ -57,6 +59,74 @@ namespace paths
     std::filesystem::path PickGameFolder(void*) { return {}; }
 }
 
+// The page's graphics options (crashott-pc's settings.h [graphics], [video] and [lighting]), by name:
+// at start from the environment, in game from the page's options panel (runtime/input_wasm.cpp).
+//   CRASHOTT_AA                off | fxaa | smaa
+//   CRASHOTT_MOTION_BLUR, _DEPTH_OF_FIELD, _SHADOW_SOFTNESS   0..200 (%; runtime/gpu_web/graphics_options_wgsl.cpp)
+//   CRASHOTT_FPS               30 | 60 (gpu::SetFrameLimit)
+//   CRASHOTT_RESOLUTION        the internal resolution's height (720 = the game's own; settings::ResolutionOf)
+//   CRASHOTT_ASPECT            auto | 4:3 | 16:9 | 16:10 | 21:9 | 32:9 (auto: the screen's, CRASH_MONITOR)
+//   CRASHOTT_SSAO              off | low | high; CRASHOTT_GI, _CONTACT_SHADOWS, _SOFT_SHADOWS 0 | 1; CRASHOTT_GI_INTENSITY 0..200
+// Every one of them applies live too: the renderer reads them each frame, rebuilds its targets for a new
+// resolution (renderer::RequestReconfigure) and the frame limit is set again.
+void ApplyGraphicsOptions(const std::function<const char*(const char*)>& get, bool live)
+{
+    const settings::Values before = settings::Get();
+    settings::Values values = before;
+    if (const char* aa = get("CRASHOTT_AA"))
+        values.antiAliasing = !strcmp(aa, "smaa") ? settings::AntiAliasing::Smaa
+                              : !strcmp(aa, "fxaa") ? settings::AntiAliasing::Fxaa : settings::AntiAliasing::Off;
+    auto percent = [&](const char* name, int& field) {
+        if (const char* text = get(name))
+            field = std::clamp(atoi(text), 0, 200);
+    };
+    auto flag = [&](const char* name, bool& field) {
+        if (const char* text = get(name))
+            field = !strcmp(text, "1");
+    };
+    percent("CRASHOTT_MOTION_BLUR", values.motionBlur);
+    percent("CRASHOTT_DEPTH_OF_FIELD", values.depthOfField);
+    percent("CRASHOTT_SHADOW_SOFTNESS", values.shadowSoftness);
+    if (const char* fps = get("CRASHOTT_FPS"))
+        values.fpsLimit = atoi(fps) == 60 ? 60 : 30;
+    if (const char* height = get("CRASHOTT_RESOLUTION"))
+        values.renderHeight = std::clamp(atoi(height), 360, 2160);
+    if (const char* aspect = get("CRASHOTT_ASPECT"))
+    {
+        static const std::pair<const char*, settings::Aspect> ASPECTS[] = { { "auto", settings::Aspect::Auto }, { "4:3", settings::Aspect::R4_3 },
+            { "16:9", settings::Aspect::R16_9 }, { "16:10", settings::Aspect::R16_10 }, { "21:9", settings::Aspect::R21_9 }, { "32:9", settings::Aspect::R32_9 } };
+        for (const auto& [name, value] : ASPECTS)
+            if (!strcmp(aspect, name))
+                values.aspect = value;
+    }
+    if (const char* ao = get("CRASHOTT_SSAO"))
+        values.ssao = !strcmp(ao, "high") ? settings::AoQuality::High : !strcmp(ao, "low") ? settings::AoQuality::Low : settings::AoQuality::Off;
+    flag("CRASHOTT_GI", values.gi);
+    percent("CRASHOTT_GI_INTENSITY", values.giIntensity);
+    flag("CRASHOTT_CONTACT_SHADOWS", values.contactShadows);
+    flag("CRASHOTT_SOFT_SHADOWS", values.softShadows);
+    settings::Set(values);
+    if (!live)
+    {
+        // The renderer starts at these (settings::AtStartup; there is no settings.toml here).
+        settings::RendererApplied(values.renderHeight, values.aspect, settings::Upscaler::Off, settings::UpscalerQuality::Native);
+    }
+    else
+    {
+        if (values.fpsLimit != before.fpsLimit)
+            gpu::SetFrameLimit(uint32_t(values.fpsLimit));
+        if (settings::RendererDiffers(values))
+            gpu::renderer::RequestReconfigure();
+    }
+    Log("[main] graphics%s: anti-aliasing %s, motion blur %d%%, depth of field %d%%, shadow softness %d%%, %d fps, resolution %s (aspect %s)",
+        live ? " (changed in game)" : "",
+        values.antiAliasing == settings::AntiAliasing::Smaa ? "SMAA" : values.antiAliasing == settings::AntiAliasing::Fxaa ? "FXAA" : "off",
+        values.motionBlur, values.depthOfField, values.shadowSoftness, values.fpsLimit, settings::ResolutionOf(values.aspect, values.renderHeight).name,
+        settings::AspectName(values.aspect));
+    Log("[main] lighting: SSAO %s, GI %s (%d%%), contact shadows %s, soft shadows %s", settings::AoQualityName(values.ssao),
+        values.gi ? "on" : "off", values.giIntensity, values.contactShadows ? "on" : "off", values.softShadows ? "on" : "off");
+}
+
 int main(int argc, char** argv)
 {
     crashott_set_args(argc, argv);
@@ -85,41 +155,8 @@ int main(int argc, char** argv)
     vfs::Init(vfs::Config{ g_game, g_mods, g_userData });
     StartWatchdog();
 
-    // The start page's graphics options (crashott-pc's settings.h [graphics] and [lighting]): anti-aliasing,
-    // the three shader options in % (runtime/gpu_web/graphics_options_wgsl.cpp), frame limit, lighting.
-    {
-        settings::Values values = settings::Get();
-        if (const char* aa = getenv("CRASHOTT_AA"))
-            values.antiAliasing = !strcmp(aa, "smaa") ? settings::AntiAliasing::Smaa
-                                  : !strcmp(aa, "fxaa") ? settings::AntiAliasing::Fxaa : settings::AntiAliasing::Off;
-        auto percent = [](const char* name, int& field) {
-            if (const char* text = getenv(name))
-                field = std::clamp(atoi(text), 0, 200);
-        };
-        percent("CRASHOTT_MOTION_BLUR", values.motionBlur);
-        percent("CRASHOTT_DEPTH_OF_FIELD", values.depthOfField);
-        percent("CRASHOTT_SHADOW_SOFTNESS", values.shadowSoftness);
-        // Frame limit (gpu::SetFrameLimit, applied by gpu::Init): 30 (the original) or 60.
-        if (const char* fps = getenv("CRASHOTT_FPS"))
-            values.fpsLimit = atoi(fps) == 60 ? 60 : 30;
-        // [lighting]: the lighting remaster (web/src/gpu/lighting.ts) and the soft shadows.
-        auto flag = [](const char* name, bool& field) {
-            if (const char* text = getenv(name))
-                field = !strcmp(text, "1");
-        };
-        if (const char* ao = getenv("CRASHOTT_SSAO"))
-            values.ssao = !strcmp(ao, "high") ? settings::AoQuality::High : !strcmp(ao, "low") ? settings::AoQuality::Low : settings::AoQuality::Off;
-        flag("CRASHOTT_GI", values.gi);
-        percent("CRASHOTT_GI_INTENSITY", values.giIntensity);
-        flag("CRASHOTT_CONTACT_SHADOWS", values.contactShadows);
-        flag("CRASHOTT_SOFT_SHADOWS", values.softShadows);
-        settings::Set(values);
-        Log("[main] graphics: anti-aliasing %s, motion blur %d%%, depth of field %d%%, shadow softness %d%%, %d fps",
-            values.antiAliasing == settings::AntiAliasing::Smaa ? "SMAA" : values.antiAliasing == settings::AntiAliasing::Fxaa ? "FXAA" : "off",
-            values.motionBlur, values.depthOfField, values.shadowSoftness, values.fpsLimit);
-        Log("[main] lighting: SSAO %s, GI %s (%d%%), contact shadows %s, soft shadows %s", settings::AoQualityName(values.ssao),
-            values.gi ? "on" : "off", values.giIntensity, values.contactShadows ? "on" : "off", values.softShadows ? "on" : "off");
-    }
+    // The start page's graphics options (the page's environment: CRASHOTT_*).
+    ApplyGraphicsOptions([](const char* name) -> const char* { return getenv(name); }, false);
 
     // No page protection in WebAssembly: crashott-pc's texture write watch (gpu/texture_watch.h) would
     // never see the game write a texture again, and textures the CPU updates (the Bink videos' frames,

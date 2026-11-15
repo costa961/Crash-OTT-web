@@ -126,12 +126,24 @@ at its end, which here belongs to the guest.
    - XMP (the Xbox music player) messages: crashott-pc's `xmsg_imports.cpp` (the title waits for their answers
      while it loads).
    - Input: the XAM input imports read four pads from a block the page writes once per frame
-     (`runtime/input_wasm.cpp`, `web/src/input.ts`: Gamepad API, keyboard as pad 1, rumble). The same file answers
-     the region, language and XConfig settings; the language is the start page's (`CRASHOTT_LANGUAGE`).
+     (`runtime/input_wasm.cpp`, `web/src/input.ts`: Gamepad API with the player's button mapping, keyboard as
+     pad 1, rumble). The same file answers the region, language and XConfig settings; the language is the start
+     page's (`CRASHOTT_LANGUAGE`). The block also carries the page's pause (tab hidden, or the F2 options panel
+     open) and the options the panel changed: "NAME=value" lines that `ApplyGraphicsOptions` (`main_wasm.cpp`, the
+     same function that reads them from the environment at start) applies at the next `XamInputGetState`:
+     `settings::Set`, `gpu::SetFrameLimit` for the frame rate, `renderer::RequestReconfigure` for a new resolution
+     or aspect ratio.
    - Game data: the start page downloads the files the game reads into OPFS (`web/src/host/download-worker.ts`,
      `gamecache.ts`); the game-thread workers open them with read-only sync access handles (`fs.ts`).
    - Saves (`/userdata`): OPFS through an I/O worker (`web/src/host/io-worker.ts`); the game's file calls are
-     synchronous, so each game-thread worker posts its request and waits on a reply word (`Atomics.wait`).
+     synchronous, so each game-thread worker posts its request and waits on a reply word (`Atomics.wait`). The
+     start page exports `userdata/content` to a .zip and imports one (`web/src/saves.ts`; stored, or deflated
+     through `DecompressionStream`).
+   - Resolution: the internal one is crashott-pc's (`CRASHOTT_RESOLUTION` / `CRASHOTT_ASPECT` ->
+     `settings::RendererApplied` before `gpu::Init`; "the screen's" aspect from `CRASH_MONITOR`, the page's
+     screen size). The canvas follows the page's size in device pixels (`ResizeObserver`, at most 4K worth of
+     pixels; `Executor.resize` writes it into the control block between two frames) and `window::GetClientSize`
+     reads it back, so the renderer presents at that size, between black bars.
    - Texture write watch off (`CRASH_TEXTURE_WATCH=0`): it relies on page protection, which WebAssembly lacks;
      the renderer hashes textures instead (CPU-updated textures: the Bink videos, dynamic UI).
 6. **Performance** — 30 fps in game (the original rate); 60 with `CRASHOTT_FPS=60` (the start page's 60 FPS mode:
@@ -158,7 +170,10 @@ at its end, which here belongs to the guest.
   runs only on 3D scenes with a perspective camera, so the headless test (menus) doesn't exercise it.
 - Overlay passes (crashott-pc's settings menu / stats overlay): not ported.
 - SMAA (`CRASHOTT_AA=smaa`): crashott-pc's three passes in WGSL (`web/src/gpu/smaa.ts`, SMAA 1x, preset high).
-- Firefox and Safari: untested (WebGPU, wasm exception handling with exnref).
+- Firefox and Safari: checked headless with Playwright's builds only. Firefox 142 has WebGPU, exnref, OPFS and
+  cross-origin isolation, but WebGPU adapters only on Windows (the start page says so elsewhere); the game is
+  untested on Firefox for Windows. Playwright's WebKit (Safari 26 engine, Linux build) has no WebGPU and no OPFS.
+  The start page checks for an adapter and OPFS, not only for `navigator.gpu`.
 - Linear memory grows to 3 GB, because the title allocates all 512 MB of physical memory at `0xA0000000` and up
   (guest address == linear address). That is commit charge, not RAM: pages the game never touches stay zero pages.
   Lowering it means folding the physical views lower for every runtime access too (`g_memory.Translate` and the

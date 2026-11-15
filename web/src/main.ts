@@ -6,7 +6,9 @@
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
 import { IO_REPLY_BYTES } from './host/io-proto';
 import { Executor } from './gpu/executor';
-import { ACTIONS, attachInput, DEFAULT_BINDINGS, keyName, loadBindings, RESERVED_KEYS, saveBindings, type Action } from './input';
+import { ACTIONS, attachInput, DEFAULT_BINDINGS, DEFAULT_PAD, keyName, loadBindings, loadPadBindings, PAD_ACTIONS, padButtonName,
+  RESERVED_KEYS, saveBindings, savePadBindings, type Action, type GameInput, type PadAction } from './input';
+import { exportSaves, importSaves } from './saves';
 import { cacheState, fmtBytes, LANGUAGES } from './host/gamecache';
 import type { FromDownload } from './host/download-worker';
 
@@ -112,17 +114,9 @@ async function start(audio: AudioContext) {
   for (const kv of q.getAll('env')) { const [k, ...v] = kv.split('='); env[k] = v.join('='); }
   env.CRASHOTT_LANGUAGE ??= languageSel.value;
   if (optSkip.checked) env.CRASH_SKIP_INTROS ??= '1';
-  const gfx = loadGraphics();
-  env.CRASHOTT_AA ??= gfx.aa;
-  env.CRASHOTT_MOTION_BLUR ??= String(gfx.mb);
-  env.CRASHOTT_DEPTH_OF_FIELD ??= String(gfx.dof);
-  env.CRASHOTT_SHADOW_SOFTNESS ??= String(gfx.sh);
-  env.CRASHOTT_SSAO ??= gfx.ssao;
-  env.CRASHOTT_GI ??= gfx.gi ? '1' : '0';
-  env.CRASHOTT_GI_INTENSITY ??= String(gfx.giI);
-  env.CRASHOTT_CONTACT_SHADOWS ??= gfx.contact ? '1' : '0';
-  env.CRASHOTT_SOFT_SHADOWS ??= gfx.soft ? '1' : '0';
-  env.CRASHOTT_FPS ??= opt60.checked ? '60' : '30';
+  for (const [k, v] of Object.entries(graphicsEnv(loadGraphics()))) env[k] ??= v;
+  // the screen's size in pixels: the "Screen's" aspect ratio (crashott-pc's settings::MonitorSize)
+  env.CRASH_MONITOR ??= `${Math.round(screen.width * devicePixelRatio)}x${Math.round(screen.height * devicePixelRatio)}`;
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
@@ -148,10 +142,14 @@ async function start(audio: AudioContext) {
           case 'ready': if (++ready === POOL) resolve(); break;
           case 'log': log(m.line); break;
           case 'gpu':
-            try { executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log }); startFps(() => executor?.framesPresented ?? 0); }
+            try {
+              executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log });
+              startFps(() => executor?.framesPresented ?? 0);
+              followCanvasSize(executor);
+            }
             catch (e) { fail(String(e)); }
             break;
-          case 'input': attachInput(memory, m.block, log, { skipPrompt: document.getElementById('skip') }); break;
+          case 'input': gameInput = attachInput(memory, m.block, log, { skipPrompt: document.getElementById('skip') }); break;
           case 'audio':
             audio.audioWorklet.addModule(new URL('./audio-worklet.js', import.meta.url)).then(() => {
               const node = new AudioWorkletNode(audio, 'crash-audio', { numberOfInputs: 0, outputChannelCount: [2],
@@ -190,8 +188,35 @@ function rememberedSwitch(id: string, key: string): HTMLInputElement {
 }
 // no logo videos, no title screen: straight to the main menu (crashott-pc's settings/direct_boot.cpp)
 const optSkip = rememberedSwitch('optSkip', 'crashott-skip-intros');
-// 60 fps instead of the original 30 (crashott-pc's frame limit, gpu::SetFrameLimit)
+// 60 fps instead of the original 30 (crashott-pc's frame limit, gpu::SetFrameLimit); the Graphics
+// dialog has the same switch
 const opt60 = rememberedSwitch('opt60', 'crashott-60fps');
+const opt60g = document.getElementById('opt60g') as HTMLInputElement;
+opt60g.checked = opt60.checked;
+opt60.addEventListener('change', () => { opt60g.checked = opt60.checked; });
+opt60g.onchange = () => {
+  opt60.checked = opt60g.checked;
+  try { localStorage.setItem('crashott-60fps', opt60.checked ? '1' : '0'); } catch { /* no storage */ }
+  sendLive();
+};
+
+// The game's input (input.ts), once it runs: the in-game options panel pauses it and sends it options.
+let gameInput: GameInput | null = null;
+
+// ---- the canvas at the page's size in pixels (full screen: the screen's resolution) ----
+function followCanvasSize(executor: Executor) {
+  const MAX = 3840 * 2160;
+  const resize = (w: number, h: number) => {
+    const scale = Math.min(1, Math.sqrt(MAX / Math.max(1, w * h)));   // at most 4K worth of pixels
+    executor.resize(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)));
+  };
+  new ResizeObserver(entries => {
+    const e = entries[entries.length - 1];
+    const box = e.devicePixelContentBoxSize?.[0];
+    if (box) resize(box.inlineSize, box.blockSize);
+    else resize(e.contentRect.width * devicePixelRatio, e.contentRect.height * devicePixelRatio);
+  }).observe(canvas);
+}
 
 // ---- full screen: F, or a double-click on the game ----
 function toggleFullscreen() {
@@ -242,20 +267,104 @@ controlsDlg.addEventListener('keydown', e => {
   drawControls();
 });
 controlsDlg.addEventListener('cancel', e => { if (waiting) { e.preventDefault(); waiting = null; drawControls(); } });
-(document.getElementById('controlsBtn') as HTMLButtonElement).onclick = () => { bindings = loadBindings(); drawControls(); controlsDlg.showModal(); };
-(document.getElementById('keysReset') as HTMLButtonElement).onclick = () => { bindings = { ...DEFAULT_BINDINGS }; saveBindings(bindings); drawControls(); };
+(document.getElementById('controlsBtn') as HTMLButtonElement).onclick = () => {
+  bindings = loadBindings(); padBindings = loadPadBindings(); drawControls(); drawPad(); controlsDlg.showModal();
+};
+(document.getElementById('keysReset') as HTMLButtonElement).onclick = () => {
+  if (padTab) { padBindings = { ...DEFAULT_PAD }; savePadBindings(padBindings); drawPad(); }
+  else { bindings = { ...DEFAULT_BINDINGS }; saveBindings(bindings); drawControls(); }
+};
 (document.getElementById('keysDone') as HTMLButtonElement).onclick = () => controlsDlg.close();
+controlsDlg.addEventListener('close', () => { padWaiting = null; });
+
+// the gamepad's buttons (input.ts PAD_ACTIONS): click an input, press the button for it
+const padtable = document.getElementById('padtable') as HTMLDivElement;
+const padNote = document.getElementById('padNote') as HTMLParagraphElement;
+const tabKeys = document.getElementById('tabKeys') as HTMLButtonElement, tabPad = document.getElementById('tabPad') as HTMLButtonElement;
+let padTab = false;
+const showTab = (pad: boolean) => {
+  padTab = pad;
+  tabKeys.classList.toggle('active', !pad); tabPad.classList.toggle('active', pad);
+  (document.getElementById('keysPane') as HTMLDivElement).hidden = pad;
+  (document.getElementById('padPane') as HTMLDivElement).hidden = !pad;
+  waiting = null; padWaiting = null; drawControls(); drawPad();
+};
+tabKeys.onclick = () => showTab(false);
+tabPad.onclick = () => showTab(true);
+let padBindings = loadPadBindings();
+let padWaiting: { action: PadAction; held: Set<number> } | null = null;
+function drawPad() {
+  padtable.replaceChildren();
+  for (const [action, label] of PAD_ACTIONS) {
+    const name = document.createElement('span');
+    name.textContent = label;
+    const button = document.createElement('button');
+    button.className = 'secondary';
+    const isWaiting = padWaiting?.action === action;
+    button.textContent = isWaiting ? 'press a button...' : padButtonName(padBindings[action]);
+    button.classList.toggle('waiting', isWaiting);
+    button.onclick = () => {
+      // the buttons already down (the one that clicked, on some pads) don't count
+      padWaiting = { action, held: new Set(pressedButtons()) };
+      drawPad();
+      requestAnimationFrame(pollPad);
+    };
+    padtable.append(name, button);
+  }
+  const pads = (navigator.getGamepads?.() ?? []).filter(g => g?.connected);
+  padNote.textContent = pads.length
+    ? `Gamepad: ${pads[0]!.id}. Click an input, then press the gamepad button for it (Esc cancels). The sticks stay as they are.`
+    : 'No gamepad found: connect one and press a button on it. Click an input, then press the gamepad button for it (Esc cancels).';
+}
+function pressedButtons(): number[] {
+  const g = (navigator.getGamepads?.() ?? []).find(p => p?.connected);
+  const out: number[] = [];
+  g?.buttons.forEach((b, i) => { if (i < 16 && (b.pressed || b.value > 0.5)) out.push(i); });
+  return out;
+}
+function pollPad() {
+  if (!padWaiting || !controlsDlg.open) return;
+  const now = pressedButtons();
+  for (const h of [...padWaiting.held]) if (!now.includes(h)) padWaiting.held.delete(h);
+  const pressed = now.find(i => !padWaiting!.held.has(i));
+  if (pressed === undefined) { requestAnimationFrame(pollPad); return; }
+  const { action } = padWaiting;
+  padWaiting = null;
+  // a button bound elsewhere moves here: the other input gets this one's old button
+  const old = padBindings[action];
+  for (const [a] of PAD_ACTIONS) if (a !== action && padBindings[a] === pressed) padBindings[a] = old;
+  padBindings[action] = pressed;
+  savePadBindings(padBindings);
+  drawPad();
+}
+window.addEventListener('gamepadconnected', () => { if (controlsDlg.open) drawPad(); });
+controlsDlg.addEventListener('keydown', e => {
+  if (padWaiting && e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); padWaiting = null; drawPad(); }
+}, true);
 
 // ---- Graphics: anti-aliasing and crashott-pc's shader options, remembered in this browser ----
 // and the lighting remaster (crashott-pc's settings.h [lighting]), all off by default
-interface Graphics { aa: string; mb: number; dof: number; sh: number; ssao: string; gi: boolean; giI: number; contact: boolean; soft: boolean }
-const GRAPHICS_DEFAULT: Graphics = { aa: 'off', mb: 100, dof: 100, sh: 100, ssao: 'off', gi: false, giI: 100, contact: false, soft: false };
+// and the internal resolution and aspect ratio (crashott-pc's settings.h [video])
+interface Graphics { res: string; aspect: string; aa: string; mb: number; dof: number; sh: number; ssao: string; gi: boolean; giI: number; contact: boolean; soft: boolean }
+const GRAPHICS_DEFAULT: Graphics = { res: '720', aspect: 'auto', aa: 'off', mb: 100, dof: 100, sh: 100, ssao: 'off', gi: false, giI: 100, contact: false, soft: false };
+/** The options as the game reads them (runtime/main_wasm.cpp ApplyGraphicsOptions), with the 60 FPS switch. */
+function graphicsEnv(g: Graphics): Record<string, string> {
+  return {
+    CRASHOTT_RESOLUTION: g.res, CRASHOTT_ASPECT: g.aspect, CRASHOTT_AA: g.aa,
+    CRASHOTT_MOTION_BLUR: String(g.mb), CRASHOTT_DEPTH_OF_FIELD: String(g.dof), CRASHOTT_SHADOW_SOFTNESS: String(g.sh),
+    CRASHOTT_SSAO: g.ssao, CRASHOTT_GI: g.gi ? '1' : '0', CRASHOTT_GI_INTENSITY: String(g.giI),
+    CRASHOTT_CONTACT_SHADOWS: g.contact ? '1' : '0', CRASHOTT_SOFT_SHADOWS: g.soft ? '1' : '0',
+    CRASHOTT_FPS: opt60.checked ? '60' : '30',
+  };
+}
 function loadGraphics(): Graphics {
   try { return { ...GRAPHICS_DEFAULT, ...JSON.parse(localStorage.getItem('crashott-graphics') ?? '{}') as Partial<Graphics> }; }
   catch { return { ...GRAPHICS_DEFAULT }; }
 }
 const graphicsDlg = document.getElementById('graphicsDlg') as HTMLDialogElement;
 const gfxEls = {
+  res: document.getElementById('optRes') as HTMLSelectElement,
+  aspect: document.getElementById('optAspect') as HTMLSelectElement,
   aa: document.getElementById('optAa') as HTMLSelectElement,
   mb: [document.getElementById('optMb') as HTMLInputElement, document.getElementById('mbVal') as HTMLOutputElement],
   dof: [document.getElementById('optDof') as HTMLInputElement, document.getElementById('dofVal') as HTMLOutputElement],
@@ -269,6 +378,8 @@ const gfxEls = {
 const PERCENTS = ['mb', 'dof', 'sh', 'giI'] as const;
 const SWITCHES = ['gi', 'contact', 'soft'] as const;
 function showGraphics(g: Graphics) {
+  gfxEls.res.value = g.res;
+  gfxEls.aspect.value = g.aspect;
   gfxEls.aa.value = g.aa;
   gfxEls.ssao.value = g.ssao;
   for (const k of PERCENTS) { gfxEls[k][0].value = String(g[k]); gfxEls[k][1].value = `${g[k]}%`; }
@@ -277,18 +388,73 @@ function showGraphics(g: Graphics) {
 }
 function storeGraphics() {
   const g: Graphics = {
-    aa: gfxEls.aa.value, mb: Number(gfxEls.mb[0].value), dof: Number(gfxEls.dof[0].value), sh: Number(gfxEls.sh[0].value),
+    res: gfxEls.res.value, aspect: gfxEls.aspect.value, aa: gfxEls.aa.value, mb: Number(gfxEls.mb[0].value), dof: Number(gfxEls.dof[0].value), sh: Number(gfxEls.sh[0].value),
     ssao: gfxEls.ssao.value, gi: gfxEls.gi.checked, giI: Number(gfxEls.giI[0].value), contact: gfxEls.contact.checked, soft: gfxEls.soft.checked,
   };
   try { localStorage.setItem('crashott-graphics', JSON.stringify(g)); } catch { /* no storage */ }
   showGraphics(g);
+  sendLive();
 }
-gfxEls.aa.onchange = gfxEls.ssao.onchange = storeGraphics;
+/** In game (the panel open with F2): the options to the game, applied when the panel closes. */
+let live = false;
+function sendLive() {
+  if (live && gameInput) gameInput.sendOptions(graphicsEnv(loadGraphics()));
+}
+gfxEls.res.onchange = gfxEls.aspect.onchange = gfxEls.aa.onchange = gfxEls.ssao.onchange = storeGraphics;
 for (const k of PERCENTS) gfxEls[k][0].oninput = storeGraphics;
 for (const k of SWITCHES) gfxEls[k].onchange = storeGraphics;
 (document.getElementById('graphicsBtn') as HTMLButtonElement).onclick = () => { showGraphics(loadGraphics()); graphicsDlg.showModal(); };
+// F2 in game: the same dialog over the game, which is paused while it is open
+const gfxNote = document.getElementById('gfxNote') as HTMLParagraphElement;
+const gfxNoteText = gfxNote.textContent ?? '';
+window.addEventListener('keydown', e => {
+  if (e.code !== 'F2' || e.repeat || !gameInput || stageEl.hidden) return;
+  e.preventDefault();
+  if (graphicsDlg.open) { graphicsDlg.close(); return; }
+  live = true;
+  gameInput.setPaused(true);
+  showGraphics(loadGraphics());
+  opt60g.checked = opt60.checked;
+  gfxNote.textContent = 'The game is paused. Changes apply when you close this panel (Done, Esc or F2).';
+  graphicsDlg.showModal();
+});
+graphicsDlg.addEventListener('close', () => {
+  if (!live) return;
+  live = false;
+  gfxNote.textContent = gfxNoteText;
+  gameInput?.setPaused(false);
+  canvas.focus?.();
+});
 (document.getElementById('gfxReset') as HTMLButtonElement).onclick = () => { showGraphics(GRAPHICS_DEFAULT); storeGraphics(); };
 (document.getElementById('gfxDone') as HTMLButtonElement).onclick = () => graphicsDlg.close();
+
+// ---- the saves: export to a .zip, import from one (saves.ts) ----
+const savesText = document.getElementById('savesText') as HTMLParagraphElement;
+const savesFile = document.getElementById('savesFile') as HTMLInputElement;
+const savesSay = (s: string) => { savesText.hidden = false; savesText.textContent = s; };
+(document.getElementById('exportSaves') as HTMLButtonElement).onclick = async () => {
+  try {
+    const zip = await exportSaves();
+    if (!zip) { savesSay('No saves in this browser yet.'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(zip.blob);
+    a.download = `crashott-saves-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    savesSay(`Saves exported (${zip.files} file${zip.files === 1 ? '' : 's'}).`);
+  } catch (e) { savesSay(`Export failed: ${String((e as Error)?.message ?? e)}`); }
+};
+(document.getElementById('importSaves') as HTMLButtonElement).onclick = () => savesFile.click();
+savesFile.onchange = async () => {
+  const file = savesFile.files?.[0];
+  savesFile.value = '';
+  if (!file) return;
+  if (!confirm('Import the saves of this file? Saves of the same name in this browser are replaced.')) return;
+  try {
+    const n = await importSaves(file);
+    savesSay(`Saves imported (${n} file${n === 1 ? '' : 's'}).`);
+  } catch (e) { savesSay(`Import failed: ${String((e as Error)?.message ?? e)}`); }
+};
 
 // ---- what this browser lacks, said before Start (rather than a failure after it) ----
 function compatibility(): string[] {
@@ -299,17 +465,27 @@ function compatibility(): string[] {
   const exnref = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
     0x0a, 0x08, 0x01, 0x06, 0x00, 0x1f, 0x40, 0x00, 0x0b, 0x0b]);
   if (!WebAssembly.validate(exnref)) missing.push('WebAssembly exception handling (exnref)');
+  // the browser's file storage (OPFS): game data and saves
+  if (typeof navigator.storage?.getDirectory !== 'function') missing.push("the browser's file storage (OPFS)");
   return missing;
 }
-{
-  const missing = compatibility();
-  if (missing.length) {
-    const el = document.getElementById('compat') as HTMLParagraphElement;
-    el.hidden = false;
-    el.textContent = `This browser can't run the game: it lacks ${missing.join(', ')}. Use a recent Chrome or Edge.`;
-    play.disabled = true;
-  }
+const compatEl = document.getElementById('compat') as HTMLParagraphElement;
+function sayIncompatible(missing: string[]) {
+  compatEl.hidden = false;
+  compatEl.textContent = `This browser can't run the game: it lacks ${missing.join(', ')}. Use a recent Chrome or Edge.`;
+  play.disabled = true;
 }
+const browserOk = (async () => {
+  const missing = compatibility();
+  // WebGPU present but no adapter (Firefox off Windows, a blocked GPU): said here too, not after Start
+  if (!missing.includes('WebGPU')) {
+    try {
+      if (!await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })) missing.push('a WebGPU adapter (GPU blocked or unsupported)');
+    } catch (e) { missing.push(`a WebGPU adapter (${String((e as Error)?.message ?? e)})`); }
+  }
+  if (missing.length) sayIncompatible(missing);
+  return !missing.length;
+})();
 
 // ---- the FPS counter (the start page's "FPS counter") ----
 const optFps = rememberedSwitch('optFps', 'crashott-fps');
@@ -335,6 +511,7 @@ const downloadBtn = document.getElementById('download') as HTMLButtonElement;
 let downloader: Worker | null = null;
 
 async function showData() {
+  if (typeof navigator.storage?.getDirectory !== 'function') { dataText.textContent = ''; downloadBtn.hidden = true; return; }
   try {
     const { have, total } = await cacheState(languageSel.value);
     if (have >= total && total > 0) {
@@ -371,7 +548,8 @@ downloadBtn.onclick = async () => {
   downloadBtn.textContent = 'Stop';
   const finish = (text?: string) => {
     downloader?.terminate(); downloader = null;
-    play.disabled = false; languageSel.disabled = false; dataBar.hidden = true;
+    languageSel.disabled = false; dataBar.hidden = true;
+    void browserOk.then(ok => { play.disabled = !ok; });
     void showData().then(() => { if (text) dataText.textContent = text; });
   };
   downloader.onmessage = (ev: MessageEvent<FromDownload>) => {
@@ -390,6 +568,8 @@ void showData();
 play.onclick = () => {
   play.disabled = true;
   languageSel.disabled = true;
+  // the saves are the game's now (the I/O worker holds them)
+  for (const id of ['exportSaves', 'importSaves']) (document.getElementById(id) as HTMLButtonElement).disabled = true;
   // Created in the click: browsers only let a page start sound from a user gesture.
   const audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   start(audio).catch(e => { fail(String(e?.message ?? e)); play.disabled = false; });
