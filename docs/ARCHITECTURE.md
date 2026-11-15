@@ -184,7 +184,8 @@ at its end, which here belongs to the guest.
   (guest address == linear address). That is commit charge, not RAM: pages the game never touches stay zero pages.
   Lowering it means folding the physical views lower for every runtime access too (`g_memory.Translate` and the
   `base + guest` of crashott-pc's code), not only the recompiled code's: not done, for a gain of ~0.5 GB of commit.
-- Deploy on a server (Caddy + Docker, as GTA SA web): to do.
+- Deploy on a private server: `deploy/` (Caddy + Docker, as GTA SA web): HTTPS, a login with a cookie per player,
+  the game's server read-only and without `/fs/userdata` (`tools/serve.mjs --no-userdata`).
 
 ## CI
 

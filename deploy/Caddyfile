@@ -1,0 +1,38 @@
+# Caddy in front of the game (compose.yml): HTTPS for CRASHOTT_HOST with a Let's Encrypt certificate it gets and
+# renews by itself (the page needs HTTPS: WebGPU and the shared memory work only in a secure context), and the
+# login. users.caddy is written at each start by caddy-entry.sh from CRASHOTT_USERS (.env): a player's cookie goes
+# straight to the game, anyone else is asked for a name and a password (once: then the cookie, for a year).
+#
+# PRIVATE: whoever gets past the login can download your game's files and the module recompiled from it. The login
+# is not optional: keep it to yourself and people who own the game.
+#
+# Caddy names no software (no Server or Via header), search engines are told to stay out, and its admin API is off.
+{
+	admin off
+}
+(game) {
+	reverse_proxy game:8080
+}
+http://{$CRASHOTT_HOST} {
+	header -Server
+	redir https://{host}{uri} 308
+}
+{$CRASHOTT_HOST} {
+	import /etc/caddy/users.caddy
+	# the game module (about 35 MB) and the page travel compressed; the game files don't (range requests)
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/wasm
+			header Content-Type text/*
+			header Content-Type application/json
+		}
+	}
+	header -Server
+	header -Via
+	header X-Robots-Tag "noindex, nofollow"
+	handle_errors {
+		header -Server
+	}
+}

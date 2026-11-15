@@ -8,7 +8,8 @@ Crash of the Titans (Xbox 360) in the browser, built from **your own copy** of t
 
 This repository contains no game code and no game assets. You supply your own legally obtained
 Xbox 360 disc image; a Docker build turns it into a browser module on your machine. What it produces is
-derived from your game: keep it for yourself, never publish it.
+derived from your game: keep it for yourself, never publish it (a private server of your own, behind a login, is
+fine: [deploy/](deploy/README.md)).
 
 It ports [crashott-pc](https://github.com/VitoMiguelF/crashott-pc) (a static recompilation of the
 Xbox 360 game for PC, built with [XenonRecomp](https://github.com/hedge-dev/XenonRecomp)) to WebAssembly and
@@ -23,7 +24,7 @@ WebGPU.
 ## Build
 
 ```sh
-git clone --recursive https://github.com/<you>/Crash-OTT-web
+git clone --recursive https://github.com/costa961/Crash-OTT-web
 cd Crash-OTT-web
 
 # 1. Your disc image -> game folder (default.xex, *.rcf, shaders/)
@@ -103,6 +104,13 @@ Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the k
 
 Saves stay in the browser (its storage for this site; Export saves for a copy); the first start copies the
 saves an older build left on the local server (`out/userdata/content`).
+
+## On a private server
+
+[deploy/](deploy/README.md) runs the game on a server of your own (Docker, Caddy for HTTPS and a login), to play it
+from anywhere. **Private servers only:** what the server holds comes from your copy of the game (your game files,
+and the game module recompiled from it), so it stays behind the login, for you and at most a few people who own the
+game, and its image never goes to a public registry. It is not a way to publish the game.
 
 ## Legal
 

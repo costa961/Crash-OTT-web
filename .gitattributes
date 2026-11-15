@@ -4,3 +4,7 @@
 *.mjs text eol=lf
 *.patch -text
 web/runtime.txt text eol=lf
+deploy/Caddyfile text eol=lf
+deploy/*.yml text eol=lf
+deploy/*.example text eol=lf
+deploy/Dockerfile* text eol=lf

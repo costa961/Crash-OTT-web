@@ -5,7 +5,10 @@
 // Cross-origin isolated (COOP/COEP): shared memory needs it. http://localhost is a secure context,
 // so WebGPU and SharedArrayBuffer work without HTTPS.
 //
-//   node tools/serve.mjs --game <dir> [--userdata <dir>] [--port 8080] [--host 127.0.0.1]
+//   node tools/serve.mjs --game <dir> [--userdata <dir> | --no-userdata] [--port 8080] [--host 127.0.0.1]
+//
+// --no-userdata (a server for others, deploy/): no /fs/userdata at all, nothing the players can write. The saves
+// are in each player's browser anyway; /fs/userdata only lets the page import an older local build's saves.
 //
 // File API (the page's synchronous XHRs; paths are looked up case-insensitively, as on the console):
 //   GET  ?op=stat                      {type, size, mtimeMs, ino} or 404
@@ -24,14 +27,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (name, def) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : def; };
 const game = arg('--game');
-const userdata = path.resolve(arg('--userdata', path.join(ROOT, 'out', 'userdata')));
+const noUserdata = argv.includes('--no-userdata');
+const userdata = noUserdata ? null : path.resolve(arg('--userdata', path.join(ROOT, 'out', 'userdata')));
 const port = Number(arg('--port', 8080)), host = arg('--host', '127.0.0.1');
 if (!game || !fs.existsSync(path.join(game, 'default.xex'))) {
   console.error('serve: --game must be the extracted game folder (with default.xex)');
   process.exit(2);
 }
-fs.mkdirSync(userdata, { recursive: true });
-const roots = { game: { dir: path.resolve(game), writable: false }, userdata: { dir: userdata, writable: true } };
+const roots = { game: { dir: path.resolve(game), writable: false } };
+if (userdata) {
+  fs.mkdirSync(userdata, { recursive: true });
+  roots.userdata = { dir: userdata, writable: true };
+}
 const DIST = path.join(ROOT, 'web', 'dist');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.map': 'application/json', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
@@ -63,7 +70,7 @@ const readBody = req => new Promise((ok, fail) => { const parts = []; req.on('da
 
 async function fileApi(req, res, url) {
   const [, , rootName, ...rest] = url.pathname.split('/');
-  const root = roots[rootName];
+  const root = Object.hasOwn(roots, rootName) ? roots[rootName] : null;
   if (!root) return send(res, 404, 'no such root');
   const rel = decodeURIComponent(rest.join('/'));
   const p = resolve(root.dir, rel);
@@ -148,5 +155,5 @@ http.createServer(async (req, res) => {
     send(res, 200, data, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
   });
 }).listen(port, host, () => {
-  console.log(`serve: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/  (game ${roots.game.dir}, userdata ${userdata})`);
+  console.log(`serve: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/  (game ${roots.game.dir}, userdata ${userdata ?? 'off'})`);
 });

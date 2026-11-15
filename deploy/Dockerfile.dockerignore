@@ -1,0 +1,5 @@
+# the build context is the repository: only what deploy/Dockerfile copies
+*
+!tools/serve.mjs
+!web/dist
+!out/web/crashott.wasm

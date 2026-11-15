@@ -1,0 +1,44 @@
+# Crash of the Titans in the browser on a PRIVATE server of your own, with Docker: the game's server (Dockerfile:
+# tools/serve.mjs with the page and the game module) and Caddy in front of it, which does HTTPS (a Let's Encrypt
+# certificate it gets and renews by itself) and the login (caddy-entry.sh). Only Caddy is reachable from outside,
+# on ports 80 and 443; the game listens on the compose network only.
+#
+# In .env next to this file (.env.example):
+#   CRASHOTT_HOST            the name players open; its DNS record points at this server
+#   CRASHOTT_USERS           the players: "name:password name:password"
+#   CRASHOTT_COOKIE_SECRET   openssl rand -hex 32
+#   CRASHOTT_GAME            your game folder: default.xex, *.rcf, shaders/ (default ./game)
+#   CRASHOTT_IMAGE           the game server's image (default crashott-web:latest, deploy/build.sh)
+# then:  docker compose up -d && docker compose logs -f
+name: crashott-web
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    entrypoint: ["/bin/sh", "/etc/caddy/entry.sh"]
+    environment:
+      CRASHOTT_HOST: ${CRASHOTT_HOST:?set CRASHOTT_HOST in .env, the name players open (crash.example.com)}
+      CRASHOTT_USERS: ${CRASHOTT_USERS:?set CRASHOTT_USERS in .env (name:password name:password)}
+      CRASHOTT_COOKIE_SECRET: ${CRASHOTT_COOKIE_SECRET:?set CRASHOTT_COOKIE_SECRET in .env (openssl rand -hex 32)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-entry.sh:/etc/caddy/entry.sh:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [game]
+    logging: { driver: local }
+  game:
+    image: ${CRASHOTT_IMAGE:-crashott-web:latest}
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: unless-stopped
+    volumes:
+      - ${CRASHOTT_GAME:-./game}:/game:ro
+    # nothing to write, no capabilities
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: { driver: local }
+volumes:
+  caddy-data:
+  caddy-config:

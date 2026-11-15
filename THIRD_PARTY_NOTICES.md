@@ -6,6 +6,7 @@
 | [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev) | fetched at build time: Xbox 360 PowerPC → C++ static recompiler | MIT |
 | [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) | build image: clang/wasm-ld for the browser module | Apache-2.0 WITH LLVM-exception |
 | [SIMDe](https://github.com/simd-everywhere/simde) | build image: x86 SIMD intrinsics on wasm SIMD128 | MIT |
+| [SMAA](https://github.com/iryoku/smaa) (Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez) | `web/src/gpu/smaa.ts`: a WGSL port of SMAA.hlsl, by way of crashott-pc (`thirdparty/smaa`, whose LICENSE.txt applies) | MIT |
 | [FFmpeg](https://ffmpeg.org) | fetched and built on the player's machine (`tools/ffmpeg_wasm.sh`): the WMA Pro decoder for XMA audio, linked into the local module | LGPL 2.1+ |
 
 The components crashott-pc itself lists in its `THIRD_PARTY_NOTICES.md` apply to the parts of it this

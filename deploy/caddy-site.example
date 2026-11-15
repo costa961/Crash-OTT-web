@@ -1,0 +1,26 @@
+# For a server that already runs Caddy on ports 80 and 443 (compose.shared.yml): this site goes into that
+# Caddyfile, with your host name, and the game's server runs on 127.0.0.1:8082 (CRASHOTT_HTTP_PORT).
+#
+# PRIVATE: keep the login. The passwords are hashes: caddy hash-password --plaintext 'the password'
+# (docker run --rm caddy:2.11-alpine caddy hash-password --plaintext 'the password').
+#
+# (If that Caddy runs in a container, 127.0.0.1 is the container itself: give it network_mode: host, or put both
+# on one compose network and proxy to the game's service name, as compose.yml does.)
+crash.example.com {
+	basic_auth {
+		player1 $2a$14$REPLACE_WITH_A_HASH_FROM_caddy_hash-password
+	}
+	reverse_proxy 127.0.0.1:8082
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/wasm
+			header Content-Type text/*
+			header Content-Type application/json
+		}
+	}
+	header -Server
+	header -Via
+	header X-Robots-Tag "noindex, nofollow"
+}
