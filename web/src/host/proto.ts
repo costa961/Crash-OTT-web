@@ -33,6 +33,7 @@ export type ToPage =
   | { t: 'log'; line: string; tid: number }
   | { t: 'gpu'; ctl: number }
   | { t: 'input'; block: number }
+  | { t: 'net'; block: number }
   | { t: 'audio'; ring: number }
   | { t: 'trap'; tid: number; message: string; stack: string }
   | { t: 'exit'; code: number };

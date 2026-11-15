@@ -11,6 +11,7 @@
 // the graphics options the page's in-game panel changed: "NAME=value" lines (main_wasm.cpp
 // ApplyGraphicsOptions), applied at the next XamInputGetState when their sequence number changes.
 #include "kernel/kernel.h"
+#include "online/mp.h"
 #include "settings/direct_boot.h"
 #include "settings/skip_cinematics.h"
 
@@ -137,6 +138,28 @@ bool WebPageHidden()
     return __atomic_load_n(&g_input.hidden, __ATOMIC_ACQUIRE) != 0;
 }
 
+// Controller `user` as the game sees it: the page's pad, and online (crashott-pc's online code, mp.h) the pad of
+// the remote player that controller plays (it replaces whatever is there).
+static bool ReadController(uint32_t user, WebPad& pad)
+{
+    bool connected = ReadPad(user, pad);
+    if (!connected)
+        pad = {};
+    if (user != 0)
+    {
+        XINPUT_GAMEPAD gamepad{ pad.buttons, pad.leftTrigger, pad.rightTrigger, pad.thumbLX, pad.thumbLY, pad.thumbRX, pad.thumbRY };
+        if (mp::RemotePad(user, &gamepad))
+        {
+            pad.buttons = gamepad.wButtons;
+            pad.leftTrigger = gamepad.bLeftTrigger, pad.rightTrigger = gamepad.bRightTrigger;
+            pad.thumbLX = gamepad.sThumbLX, pad.thumbLY = gamepad.sThumbLY, pad.thumbRX = gamepad.sThumbRX, pad.thumbRY = gamepad.sThumbRY;
+            pad.connected = 1;
+            connected = true;
+        }
+    }
+    return connected;
+}
+
 // u32 XamInputGetCapabilities(u32 UserIndex, u32 Flags, XINPUT_CAPABILITIES* Caps)
 PPC_FUNC(__imp__XamInputGetCapabilities)
 {
@@ -144,7 +167,7 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     uint32_t user = ctx.r3.u32 == 0xFF ? 0 : ctx.r3.u32;
     uint32_t caps = ctx.r5.u32;
     WebPad pad;
-    if (user >= 4 || !ReadPad(user, pad))
+    if (user >= 4 || !ReadController(user, pad))
     {
         ctx.r3.u64 = ERROR_DEVICE_NOT_CONNECTED_;
         return;
@@ -174,7 +197,7 @@ PPC_FUNC(__imp__XamInputGetState)
     uint32_t user = ctx.r3.u32 == 0xFF ? 0 : ctx.r3.u32;
     uint32_t statePtr = ctx.r5.u32;
     WebPad pad;
-    if (user >= 4 || !ReadPad(user, pad))
+    if (user >= 4 || !ReadController(user, pad))
     {
         ctx.r3.u64 = ERROR_DEVICE_NOT_CONNECTED_;
         return;
@@ -187,7 +210,10 @@ PPC_FUNC(__imp__XamInputGetState)
         // game meanwhile (crashott-pc's settings/skip_cinematics.cpp, as its XamInputGetState does).
         XINPUT_GAMEPAD gamepad{ pad.buttons, pad.leftTrigger, pad.rightTrigger, pad.thumbLX, pad.thumbLY, pad.thumbRX, pad.thumbRY };
         cutscenes::FilterGameInput(gamepad, true);
+        // Online: player 1's pad to the other players (it may hold the stick back: CRASH_MP_LEASH).
+        mp::LocalPad(&gamepad, true);
         pad.buttons = gamepad.wButtons;
+        pad.thumbLX = gamepad.sThumbLX, pad.thumbLY = gamepad.sThumbLY;
         __atomic_store_n(&g_input.skippable, cutscenes::SkipPossible() ? 1u : 0u, __ATOMIC_RELEASE);
         ApplyPageOptions();
     }

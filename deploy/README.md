@@ -63,6 +63,9 @@ Whatever proxy you use, it must ask for a login: the game's server itself has no
 
 ## Notes
 
+- Online co-op goes through this server too: a WebSocket on `/net` (Caddy proxies it, behind the same login), where
+  the players' browsers find each other (`tools/netswitch.mjs`). Only people with a login can host or join.
+
 - The page is cross-origin isolated (`Cross-Origin-Opener-Policy` / `-Embedder-Policy`): `tools/serve.mjs` sends
   those headers and Caddy passes them on. A proxy that drops them breaks the game (the start page says what is
   missing).

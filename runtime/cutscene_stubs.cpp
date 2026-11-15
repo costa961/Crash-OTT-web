@@ -42,13 +42,4 @@ namespace touch_controls { bool Enabled() { return false; } }
 
 namespace subtitles { void EndCutscenes() {} }
 
-namespace mp
-{
-    void CinematicDone() {}
-}
-namespace mp::lobby
-{
-    void HostSkippedCutscene(uint32_t) {}
-    bool TakeCutsceneSkip(uint32_t) { return false; }
-    bool IsClient() { return false; }
-}
+// mp::CinematicDone and the cutscene skips of mp::lobby: crashott-pc's online code (web/runtime.txt).

@@ -157,6 +157,34 @@ at its end, which here belongs to the guest.
    and the first loading screen, 17 now), each a pipeline the browser compiles while the game runs (hitches), and
    the lookups cost the command processor ~6 ms per frame (0.05 ms now).
 
+## Online co-op
+
+crashott-pc's online mode (`runtime/online/`: players over the network, room streaming, skins and colours, the
+session protocol "CML1") is built as it is, with three things of the browser's own:
+- **A virtual LAN** in place of UDP sockets. The game's few socket calls (`online/mp_net.cpp`, `mp_lobby.cpp`) go to
+  `runtime/net_wasm.cpp` (macros in `patches/crashott-pc-web.patch`): a mailbox in shared memory, a TX ring the page
+  drains and an RX ring it fills, with bells (`memory.atomic.wait32` / `Atomics.waitAsync`). The page
+  (`web/src/net.ts`) relays the datagrams over a WebSocket (`/net`) to the server's switch (`tools/netswitch.mjs`, in
+  `tools/serve.mjs`): every browser gets an address (10.77.0.x) and its datagrams go where they say, broadcasts to
+  every other browser (the same design as NFSU2 web coop's virtual LAN, with GTA SA web's dependency-free WebSocket).
+  `/net/hosts` lists the browsers hosting a session (what they announce). No UPnP or STUN (`mp_nat.cpp` out): the
+  server is the meeting point, local or the private VPS (Caddy proxies the WebSocket behind the same login).
+- **The page instead of the MULTIPLAYER screens.** `online/mp_menu.cpp` is drawn with the PC build's menu art; its
+  game side is kept in `runtime/mp_web.cpp`: `OverrideExit` (from `runtime/frontend_web.cpp`: a hosted new game goes
+  to the HUB, a client follows each level the host starts with StartLevel + SkipToLevel, its way out without a save,
+  cutscenes that start together), the PauseGame and HaveBothPlayersJoinedGame hooks, the level load / unload hooks
+  of `dev/dev_skins.cpp` (the spawned actors' names start again on every machine) and a reduced `dev::RunLua`. The
+  session is the start page's choice (`CRASHOTT_MP` = host / join, `CRASHOTT_MP_NAME`, `CRASHOTT_MP_JOIN`); its
+  state goes to the page's panel as JSON and the page sends commands (leave, quit-level, resume, level:N) through
+  the mailbox.
+- **Input**: `runtime/input_wasm.cpp` sends player 1's pad (`mp::LocalPad`) and gives controllers 2-4 the remote
+  players' pads (`mp::RemotePad`). A client waiting at the main menu has its buttons off (`input.ts` setBlocked):
+  the host's level start is taken from the main menu.
+
+The skins' colour table (`mp_skin_palettes.inc`, made by crashott-pc from extracted game data) is empty here: the
+players' colours go on the fur only. Tested headless with two browsers on one machine (the session, the level
+start, both Crashes in L1_E1, the host's records with no loss); playing a level through needs two real machines.
+
 ## Known gaps
 
 - Stencil views sampled by draws: the null texture (depth views are copied to `r32float`); no draw of the menus,

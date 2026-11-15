@@ -16,12 +16,14 @@
 //   GET  (Range: bytes=a-b)            the bytes
 //   PUT  ?op=write&pos=N  (body)       writes at N (creates the file)
 //   POST ?op=truncate&size=N | op=mkdir | op=unlink | op=rmdir | op=rename&to=<root>/<path>
+// /net (WebSocket) and /net/hosts: the online co-op's virtual LAN between the players' browsers (netswitch.mjs).
 // /fs-manifest: every file of the game folder {files: [{p, s, m}]} (path, size, mtime), for the page's
 // download into the browser's storage (web/src/host/download-worker.ts).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NetSwitch } from './netswitch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -140,8 +142,10 @@ function manifest(dir, prefix = '', out = []) {
   return out;
 }
 
-http.createServer(async (req, res) => {
+const net = new NetSwitch(line => console.log(line));
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/net/hosts') return send(res, 200, JSON.stringify(net.hosts()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (url.pathname === '/fs-manifest') return json(res, { files: manifest(roots.game.dir) });
   if (url.pathname.startsWith('/fs/')) return fileApi(req, res, url);
   let file;
@@ -154,6 +158,11 @@ http.createServer(async (req, res) => {
     if (err) return send(res, 404, 'not found');
     send(res, 200, data, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
   });
-}).listen(port, host, () => {
+});
+server.on('upgrade', (req, socket) => {
+  if (new URL(req.url, 'http://x').pathname === '/net') net.accept(req, socket);
+  else socket.destroy();
+});
+server.listen(port, host, () => {
   console.log(`serve: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/  (game ${roots.game.dir}, userdata ${userdata ?? 'off'})`);
 });

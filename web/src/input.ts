@@ -4,6 +4,10 @@
 //
 // The bindings are the player's (the start page's Controls, remembered in this browser): one key per
 // pad input (Enter is always A too, for the menus), and which gamepad button is which pad input.
+//
+// Local co-op (the game's own: a 2nd controller's B joins as player 2): controllers 1-4 are the gamepads in
+// order, the keyboard with the first one. With "the keyboard plays player 2" (keyboardPlayer() = 2) and a
+// gamepad connected, the first gamepad is controller 1, the keyboard controller 2, the other gamepads 3-4.
 
 // XINPUT_GAMEPAD_* bits
 const B = { UP: 0x0001, DOWN: 0x0002, LEFT: 0x0004, RIGHT: 0x0008, START: 0x0010, BACK: 0x0020, LS: 0x0040, RS: 0x0080,
@@ -74,6 +78,15 @@ export function loadBindings(): Bindings {
   return b;
 }
 
+const KEYBOARD_PLAYER_KEY = 'crashott-keyboard-player';
+/** Which player the keyboard plays (1, or 2 next to a gamepad playing 1): the start page's Controls. */
+export function keyboardPlayer(): 1 | 2 {
+  try { return localStorage.getItem(KEYBOARD_PLAYER_KEY) === '2' ? 2 : 1; } catch { return 1; }
+}
+export function setKeyboardPlayer(player: 1 | 2) {
+  try { localStorage.setItem(KEYBOARD_PLAYER_KEY, String(player)); } catch { /* no storage */ }
+}
+
 export function saveBindings(b: Bindings) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(b)); } catch { /* no storage */ }
 }
@@ -107,6 +120,8 @@ export interface InputOptions {
 export interface GameInput {
   /** The game held and its input off (the in-game options panel), or running again. */
   setPaused(paused: boolean): void;
+  /** The game goes on but sees no button (an online co-op client waiting at the main menu for the host). */
+  setBlocked(blocked: boolean): void;
   /** Graphics options by name (main_wasm.cpp ApplyGraphicsOptions), applied at the game's next frame. */
   sendOptions(options: Record<string, string>): void;
   detach(): void;
@@ -115,7 +130,8 @@ export interface GameInput {
 export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: string) => void, opts: InputOptions = {}): GameInput {
   const bindings = loadBindings();
   const padBindings = loadPadBindings();
-  let paused = false;
+  const keyboardAsPlayer2 = keyboardPlayer() === 2;
+  let paused = false, blocked = false;
   const keyToActions = new Map<string, Action[]>();
   for (const [a] of ACTIONS) keyToActions.set(bindings[a], [...(keyToActions.get(bindings[a]) ?? []), a]);
   const keys = new Set<string>();
@@ -170,10 +186,13 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
 
     let skipHeld = false;
     Atomics.add(i32, 1, 1);   // odd: writing
+    // controller p's gamepad, and whether the keyboard drives it (the header: local co-op)
+    const kbSecond = keyboardAsPlayer2 && pads.length > 0;
     for (let p = 0; p < 4; p++) {
-      const g = pads[p];
+      const g = !kbSecond ? pads[p] : p === 0 ? pads[0] : p === 1 ? undefined : pads[p - 1];
+      const keyboard = kbSecond ? p === 1 : p === 0;
       let buttons = 0, lt = 0, rt = 0, lx = 0, ly = 0, rx = 0, ry = 0, connected = !!g;
-      if (g && !paused) {
+      if (g && !paused && !blocked) {
         for (const [a, bit] of Object.entries(PAD_BIT) as [PadAction, number][]) if (bit && g.buttons[padBindings[a]]?.pressed) buttons |= bit;
         const trigger = (i: number) => { const b = g.buttons[i]; return Math.round((b ? Math.max(b.value, b.pressed ? 1 : 0) : 0) * 255); };
         lt = trigger(padBindings.lt);
@@ -181,8 +200,7 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
         lx = axis(g.axes[0] ?? 0); ly = -axis(g.axes[1] ?? 0);   // XInput: up is positive
         rx = axis(g.axes[2] ?? 0); ry = -axis(g.axes[3] ?? 0);
       }
-      if (p === 0) {
-        // the keyboard is always a pad 0, with the first gamepad or alone
+      if (keyboard && !paused && !blocked) {
         connected = true;
         for (const [a, bit] of Object.entries(BUTTON_OF) as [Action, number][]) if (held(a)) buttons |= bit;
         if (keys.has('Enter') || keys.has('NumpadEnter')) buttons |= B.A;
@@ -192,8 +210,10 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
         if (kx || ky) { lx = kx; ly = ky; }
         const krx = keyAxis('rsLeft', 'rsRight'), kry = keyAxis('rsDown', 'rsUp');
         if (krx || kry) { rx = krx; ry = kry; }
-        skipHeld = (buttons & (B.A | B.BB | B.START)) !== 0;
       }
+      if (keyboard) connected = true;
+      // the cutscene skip reads controller 1 (runtime/input_wasm.cpp)
+      if (p === 0) skipHeld = (buttons & (B.A | B.BB | B.START)) !== 0;
       const o = p * PAD_BYTES;
       dv.setUint32(o, connected ? 1 : 0, true);
       dv.setUint16(o + 4, buttons, true);
@@ -227,6 +247,12 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
       paused = p;
       hold();
       log(`[input] ${paused ? 'options panel open: game paused' : 'options panel closed: game running'}`);
+    },
+    setBlocked(b: boolean) {
+      if (b === blocked) return;
+      blocked = b;
+      if (b) keys.clear();
+      log(`[input] ${b ? 'buttons off for the game (waiting for the co-op host)' : 'buttons back on for the game'}`);
     },
     sendOptions(options: Record<string, string>) {
       const text = new TextEncoder().encode(Object.entries(options).map(([k, v]) => `${k}=${v}`).join('\n'));

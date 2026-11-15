@@ -262,6 +262,7 @@ self.onmessage = async (ev: MessageEvent<WorkerInit>) => {
     gpu_register: (ctlPtr: number) => { post({ t: 'gpu', ctl: ctlPtr }); return 1; },
     // the controllers' block (runtime/input_wasm.cpp): the page writes it (input.ts)
     input_register: (block: number) => post({ t: 'input', block }),
+    net_register: (block: number) => post({ t: 'net', block }),
     // the sound ring (runtime/audio_device_web.cpp): the page's AudioWorklet plays it
     audio_register: (ring: number) => post({ t: 'audio', ring }),
   };

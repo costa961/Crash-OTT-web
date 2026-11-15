@@ -24,6 +24,9 @@ cp -r "$ROOT/third_party/crashott-pc/thirdparty/smaa" "$ROOT/third_party/crashot
 # current directory.
 (cd "$OUT/cpc-src" && git init -q && git apply --ignore-whitespace "$ROOT/patches/crashott-pc-web.patch") ||
   { echo "patches/crashott-pc-web.patch does not apply to third_party/crashott-pc"; exit 1; }
+# The online co-op's skin colour table (online/mp_colors.cpp): crashott-pc makes it from the extracted game data
+# (tools/mp_skin_colours.py); empty, the players' colours go on the fur only (as crashott-pc's own builds without it).
+echo "// empty: the skins get the fur test only (online/mp_colors.cpp)" > "$CPC/online/mp_skin_palettes.inc"
 
 # Guest layout (docs/ARCHITECTURE.md "Memory model"): guest address == linear memory address. The
 # runtime's data, stack and heap stay below RUNTIME_END (runtime/sbrk.c), where the guest never goes.

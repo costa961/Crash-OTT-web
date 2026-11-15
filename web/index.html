@@ -23,6 +23,16 @@
   select { font: inherit; background: #1a1a1f; color: var(--fg); border: 1px solid #3a3a42; border-radius: 6px; padding: 4px 8px; }
   #logs { font: 14px system-ui, sans-serif; padding: 4px 8px; border: 0; background: none; color: #aaa; text-decoration: underline; cursor: pointer; }
   #logs:hover { color: #ddd; }
+  #mpPanel { position: fixed; top: 8px; right: 10px; z-index: 5; max-width: 300px; padding: 8px 10px; border-radius: 8px;
+    background: rgba(10, 10, 14, 0.72); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; pointer-events: none; }
+  #mpPanel b { color: var(--accent); font-weight: 600; }
+  #mpPanel .me { color: #7CFC7C; }
+  .mplist { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+  .mplist .host { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 8px;
+    border: 1px solid #33333b; border-radius: 8px; font-size: 14px; }
+  .mplist .host span { color: var(--muted); font-size: 13px; }
+  #mpName { font: inherit; background: #1a1a1f; color: var(--fg); border: 1px solid #3a3a42; border-radius: 6px; padding: 4px 8px;
+    width: 12ch; text-transform: uppercase; }
   #fps { position: fixed; top: 8px; left: 10px; z-index: 5; font: 600 15px/1 ui-monospace, monospace; color: #7CFC7C;
          background: rgba(0, 0, 0, 0.55); padding: 4px 8px; border-radius: 6px; pointer-events: none; }
   /* on/off switches */
@@ -69,7 +79,10 @@
   <h1>Crash of the Titans</h1>
   <p>The Xbox 360 game, recompiled to WebAssembly from your own copy. Unofficial, work in progress.</p>
   <p id="compat" hidden></p>
-  <button id="play">Start</button>
+  <div class="row">
+    <button id="play">Start</button>
+    <button id="coopBtn" class="secondary" title="Play the story together with other players on this server">Online co-op</button>
+  </div>
   <label id="langRow">Language <select id="language"></select></label>
   <div id="data">
     <p id="dataText">Game data: checking...</p>
@@ -98,6 +111,9 @@
     <button id="tabKeys" class="tab active" role="tab">Keyboard</button>
     <button id="tabPad" class="tab" role="tab">Gamepad</button>
   </div>
+  <label class="setting">Two players on this PC: the keyboard plays <select id="optKbPlayer">
+    <option value="1">Player 1 (with the first gamepad)</option><option value="2">Player 2 (a gamepad plays Player 1)</option></select></label>
+  <p class="dlgnote" style="margin-top:0">Co-op: Player 2 presses B in game to join (and rides in Crash's backpack, Y to jump off). Two gamepads: the second one is Player 2.</p>
   <div id="keysPane">
     <div class="keytable" id="keytable"></div>
     <p class="dlgnote">Click a key, then press the new one (Esc cancels). Enter is always A too.</p>
@@ -107,6 +123,22 @@
     <p class="dlgnote" id="padNote">Click an input, then press the gamepad button for it (Esc cancels). The sticks stay as they are.</p>
   </div>
   <div class="dlgbar"><button id="keysReset" class="secondary">Reset</button><button id="keysDone">Done</button></div>
+</dialog>
+<dialog id="coopDlg">
+  <h2>Online co-op</h2>
+  <p class="dlgnote" style="margin-top:0">Play the story together, each in their own browser, through this server. The host plays
+    as usual (a new game goes to the HUB); the others join and follow the host into every level it starts. Up to 4 players.</p>
+  <label class="setting">Your name <input id="mpName" maxlength="12" autocomplete="off" spellcheck="false"></label>
+  <div class="dlgbar" style="justify-content:flex-start;margin-top:4px"><button id="mpHost">Host a session</button></div>
+  <h3>Sessions on this server</h3>
+  <div id="mpList" class="mplist"><p class="dlgnote">Looking...</p></div>
+  <p class="dlgnote">Join while the host is in the menus or at the HUB (not in a level). Only the host keeps a save.</p>
+  <div class="dlgbar"><button id="coopDone" class="secondary">Close</button></div>
+</dialog>
+<dialog id="mpLevelDlg">
+  <h2>Online co-op</h2>
+  <p class="dlgnote" style="margin-top:0">The game goes on for the others meanwhile.</p>
+  <div class="dlgbar"><button id="mpLeave" class="secondary">Leave the session</button><button id="mpResume">Resume</button></div>
 </dialog>
 <dialog id="graphicsDlg">
   <h2>Graphics</h2>
@@ -136,6 +168,7 @@
 </dialog>
 <div id="status"></div>
 <div id="fps" hidden></div>
+<div id="mpPanel" hidden></div>
 <div id="skip" hidden><svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15.9" pathLength="100"></circle><circle class="fill" cx="18" cy="18" r="15.9" pathLength="100"></circle></svg><span class="label">Hold to skip</span></div>
 <script type="module" src="main.js"></script>
 </body>

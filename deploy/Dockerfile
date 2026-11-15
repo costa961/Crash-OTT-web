@@ -8,7 +8,7 @@
 #   docker build -f deploy/Dockerfile -t crashott-web .        (from the repository's root)
 FROM node:24-alpine
 WORKDIR /app
-COPY tools/serve.mjs tools/
+COPY tools/serve.mjs tools/netswitch.mjs tools/
 COPY web/dist web/dist
 COPY out/web/crashott.wasm out/web/
 USER node

@@ -29,6 +29,7 @@
 extern "C" void crashott_set_args(int argc, char** argv); // platform_wasm.cpp
 
 namespace audio { void Init(); }
+void StartWebSession();  // mp_web.cpp: the online co-op session the page chose
 
 namespace
 {
@@ -167,6 +168,7 @@ int main(int argc, char** argv)
     InitGuestProcess(stackSize);
     gpu::Init();
     audio::Init();
+    StartWebSession();
     uint32_t result = RunGuestThread(module.entryPoint, stackSize);
 
     Log("[thread] guest entry point returned, r3=0x%08X", result);

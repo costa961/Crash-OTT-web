@@ -123,3 +123,66 @@ diff --git a/runtime/gpu/xenos_renderer.cpp b/runtime/gpu/xenos_renderer.cpp
                      Log("[gpu] %s: graphics option \"%s\" applied", name, patch);
                  if (g_dumpShaders && !g_shaderCacheDir.empty())
                  {
+diff --git a/runtime/online/mp_lobby.cpp b/runtime/online/mp_lobby.cpp
+index d9eac6f..3cabdea 100644
+--- a/runtime/online/mp_lobby.cpp
++++ b/runtime/online/mp_lobby.cpp
+@@ -18,6 +18,9 @@
+ #include <winsock2.h>
+ #include <ws2tcpip.h>
+ #include <windows.h>
++#elif defined(CRASH_WEB)
++#include "net_wasm.h"  // the browser build's virtual LAN
++#include <arpa/inet.h>
+ #else
+ #ifdef __ANDROID__
+ #include <sys/system_properties.h>
+@@ -176,7 +179,14 @@ namespace mp::lobby
+         // (a UDP connect sends nothing).
+         uint32_t LocalIp()
+         {
++#ifdef CRASH_WEB
++            // The browser build: this browser's address on the server's virtual LAN (runtime/net_wasm.h).
++            if (uint32_t ip = vnet_local_ip())
++                return ip;
++            return 0x7F000001;
++#endif
+             uint32_t found = 0x7F000001;
++#ifndef CRASH_WEB
+             for (uint32_t probe : { 0x0A0A0A0Au, 0xC0A80001u, 0x08080808u })
+             {
+                 int sock = int(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+@@ -199,6 +209,7 @@ namespace mp::lobby
+                 if (ok && ip && (ip >> 24) != 127)
+                     return ip;
+             }
++#endif
+             return found;
+         }
+ 
+diff --git a/runtime/online/mp_net.cpp b/runtime/online/mp_net.cpp
+index 180b3dc..368dc10 100644
+--- a/runtime/online/mp_net.cpp
++++ b/runtime/online/mp_net.cpp
+@@ -64,6 +64,21 @@
+ using socket_t = SOCKET;
+ static void CloseSocket(socket_t s) { closesocket(s); }
+ static bool SetNonBlocking(socket_t s) { u_long on = 1; return ioctlsocket(s, FIONBIO, &on) == 0; }
++#elif defined(CRASH_WEB)
++// The browser build: the server's virtual LAN (runtime/net_wasm.h) behind the same few socket calls.
++#include "net_wasm.h"
++#include <arpa/inet.h>
++using socket_t = int;
++static constexpr socket_t INVALID_SOCKET = -1;
++static void CloseSocket(socket_t s) { vnet_close(s); }
++static bool SetNonBlocking(socket_t) { return true; }
++#define socket vnet_socket
++#define bind vnet_bind
++#define setsockopt vnet_setsockopt
++#define getsockname vnet_getsockname
++#define select vnet_select
++#define recvfrom vnet_recvfrom
++#define sendto vnet_sendto
+ #else
+ #include <arpa/inet.h>
+ #include <fcntl.h>

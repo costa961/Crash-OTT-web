@@ -6,9 +6,10 @@
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
 import { IO_REPLY_BYTES } from './host/io-proto';
 import { Executor } from './gpu/executor';
-import { ACTIONS, attachInput, DEFAULT_BINDINGS, DEFAULT_PAD, keyName, loadBindings, loadPadBindings, PAD_ACTIONS, padButtonName,
-  RESERVED_KEYS, saveBindings, savePadBindings, type Action, type GameInput, type PadAction } from './input';
+import { ACTIONS, attachInput, DEFAULT_BINDINGS, DEFAULT_PAD, keyboardPlayer, keyName, loadBindings, loadPadBindings, PAD_ACTIONS, padButtonName,
+  RESERVED_KEYS, saveBindings, savePadBindings, setKeyboardPlayer, type Action, type GameInput, type PadAction } from './input';
 import { exportSaves, importSaves } from './saves';
+import { attachNet, listHosts, type GameNet } from './net';
 import { cacheState, fmtBytes, LANGUAGES } from './host/gamecache';
 import type { FromDownload } from './host/download-worker';
 
@@ -100,7 +101,10 @@ async function gpu(): Promise<GPUDevice> {
   return device;
 }
 
-async function start(audio: AudioContext) {
+/** An online co-op session chosen on the start page (runtime/mp_web.cpp): host, or join a host's address. */
+interface MpChoice { role: 'host' | 'join'; name: string; join?: string }
+
+async function start(audio: AudioContext, mp?: MpChoice) {
   if (!crossOriginIsolated) throw new Error('The page is not cross-origin isolated (serve it with tools/serve.mjs).');
   status('Loading the game module...');
   const device = await gpu();
@@ -113,6 +117,13 @@ async function start(audio: AudioContext) {
   const env: Record<string, string> = {};
   for (const kv of q.getAll('env')) { const [k, ...v] = kv.split('='); env[k] = v.join('='); }
   env.CRASHOTT_LANGUAGE ??= languageSel.value;
+  if (mp) {
+    env.CRASHOTT_MP = mp.role;
+    env.CRASHOTT_MP_NAME = mp.name;
+    if (mp.join) env.CRASHOTT_MP_JOIN = mp.join;
+    // a client waits for the host's level at the main menu: straight there
+    if (mp.role === 'join') env.CRASH_SKIP_INTROS = '1';
+  }
   if (optSkip.checked) env.CRASH_SKIP_INTROS ??= '1';
   for (const [k, v] of Object.entries(graphicsEnv(loadGraphics()))) env[k] ??= v;
   // the screen's size in pixels: the "Screen's" aspect ratio (crashott-pc's settings::MonitorSize)
@@ -150,6 +161,7 @@ async function start(audio: AudioContext) {
             catch (e) { fail(String(e)); }
             break;
           case 'input': gameInput = attachInput(memory, m.block, log, { skipPrompt: document.getElementById('skip') }); break;
+          case 'net': if (mp) startMpPanel(attachNet(memory, m.block, log, { name: mp.name, hosting: mp.role === 'host' }), mp); break;
           case 'audio':
             audio.audioWorklet.addModule(new URL('./audio-worklet.js', import.meta.url)).then(() => {
               const node = new AudioWorkletNode(audio, 'crash-audio', { numberOfInputs: 0, outputChannelCount: [2],
@@ -290,6 +302,10 @@ const showTab = (pad: boolean) => {
   waiting = null; padWaiting = null; drawControls(); drawPad();
 };
 tabKeys.onclick = () => showTab(false);
+// local co-op: which player the keyboard plays (input.ts keyboardPlayer); read when the game starts
+const kbPlayerSel = document.getElementById('optKbPlayer') as HTMLSelectElement;
+kbPlayerSel.value = String(keyboardPlayer());
+kbPlayerSel.onchange = () => setKeyboardPlayer(kbPlayerSel.value === '2' ? 2 : 1);
 tabPad.onclick = () => showTab(true);
 let padBindings = loadPadBindings();
 let padWaiting: { action: PadAction; held: Set<number> } | null = null;
@@ -587,12 +603,99 @@ downloadBtn.onclick = async () => {
 };
 void showData();
 
-play.onclick = () => {
+function startGame(mp?: MpChoice) {
   play.disabled = true;
   languageSel.disabled = true;
+  coopBtn.disabled = true;
   // the saves are the game's now (the I/O worker holds them)
   for (const id of ['exportSaves', 'importSaves']) (document.getElementById(id) as HTMLButtonElement).disabled = true;
   // Created in the click: browsers only let a page start sound from a user gesture.
   const audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
-  start(audio).catch(e => { fail(String(e?.message ?? e)); play.disabled = false; });
+  start(audio, mp).catch(e => { fail(String(e?.message ?? e)); play.disabled = false; coopBtn.disabled = false; });
+}
+play.onclick = () => startGame();
+
+// ---- online co-op (net.ts, runtime/mp_web.cpp, tools/netswitch.mjs) ----
+const coopBtn = document.getElementById('coopBtn') as HTMLButtonElement;
+const coopDlg = document.getElementById('coopDlg') as HTMLDialogElement;
+const mpName = document.getElementById('mpName') as HTMLInputElement;
+const mpList = document.getElementById('mpList') as HTMLDivElement;
+// the session's names: A-Z 0-9, 12 letters (crashott-pc's online/mp_lobby.h)
+const cleanName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+try { mpName.value = localStorage.getItem('crashott-mp-name') ?? ''; } catch { /* no storage */ }
+mpName.oninput = () => {
+  const v = cleanName(mpName.value);
+  if (v !== mpName.value) mpName.value = v;
+  try { localStorage.setItem('crashott-mp-name', v); } catch { /* no storage */ }
 };
+const playerName = () => cleanName(mpName.value) || 'PLAYER';
+let listTimer = 0;
+async function drawHosts() {
+  const hosts = await listHosts();
+  mpList.replaceChildren();
+  if (!hosts.length) {
+    const p = document.createElement('p');
+    p.className = 'dlgnote';
+    p.textContent = 'No session on this server yet. Host one, or wait for a friend to host.';
+    mpList.append(p);
+    return;
+  }
+  for (const h of hosts) {
+    const row = document.createElement('div');
+    row.className = 'host';
+    const label = document.createElement('div');
+    label.textContent = h.name || 'PLAYER';
+    const info = document.createElement('span');
+    info.textContent = ` ${h.players || 1}/${h.maxPlayers || 4} players${h.inGame ? ' · in a level' : ''}`;
+    label.append(info);
+    const join = document.createElement('button');
+    join.textContent = 'Join';
+    join.disabled = h.inGame || play.disabled;
+    join.title = h.inGame ? 'The host is in a level: join when it is back at the HUB' : '';
+    join.onclick = () => { coopDlg.close(); startGame({ role: 'join', name: playerName(), join: h.ip }); };
+    row.append(label, join);
+    mpList.append(row);
+  }
+}
+coopBtn.onclick = () => {
+  void drawHosts();
+  listTimer = window.setInterval(() => void drawHosts(), 2000);
+  coopDlg.showModal();
+};
+coopDlg.addEventListener('close', () => clearInterval(listTimer));
+(document.getElementById('coopDone') as HTMLButtonElement).onclick = () => coopDlg.close();
+(document.getElementById('mpHost') as HTMLButtonElement).onclick = () => { coopDlg.close(); startGame({ role: 'host', name: playerName() }); };
+
+/** The session's panel over the game (the runtime's status, mp_web.cpp) and the client's menu in a level. */
+function startMpPanel(net: GameNet, mp: MpChoice) {
+  const panel = document.getElementById('mpPanel') as HTMLDivElement;
+  const levelDlg = document.getElementById('mpLevelDlg') as HTMLDialogElement;
+  (document.getElementById('mpResume') as HTMLButtonElement).onclick = () => { net.command('resume'); levelDlg.close(); };
+  (document.getElementById('mpLeave') as HTMLButtonElement).onclick = () => { net.command('leave'); levelDlg.close(); };
+  levelDlg.addEventListener('cancel', () => net.command('resume'));
+  // tests (out/coop.mjs): a command to the session from the console
+  (window as unknown as { mpCommand?: (t: string) => void }).mpCommand = t => net.command(t);
+  panel.hidden = false;
+  panel.textContent = mp.role === 'host' ? 'Online co-op: connecting...' : 'Online co-op: joining...';
+  let lastState = '';
+  setInterval(() => {
+    const s = net.status() as null | { state: string; reason?: string; address?: string; inGame?: boolean; clientInLevel?: boolean;
+      levelMenu?: boolean; maxPlayers?: number; players?: { slot: number; name: string; ping: number; me: boolean }[] };
+    if (!s) return;
+    if (s.state !== lastState) { log(`[mp] session: ${s.state}${s.reason ? ` (${s.reason})` : ''}`); lastState = s.state; }
+    const players = s.players ?? [];
+    net.announce({ name: mp.name, hosting: s.state === 'hosting', players: players.length, maxPlayers: s.maxPlayers, inGame: s.inGame });
+    const head = { hosting: 'Hosting', joining: 'Joining...', joined: 'Joined', failed: 'Not connected', off: 'Session closed', searching: 'Searching...' }[s.state] ?? s.state;
+    const lines: string[] = [`<b>Online co-op</b> · ${head}`];
+    if (s.state === 'failed' || s.state === 'off') lines.push(s.reason || 'The session ended.');
+    for (const p of players) lines.push(`${p.me ? '<span class="me">' : ''}P${p.slot + 1} ${escapeHtml(p.name)}${p.me ? ' (you)</span>' : ` · ${p.ping} ms`}`);
+    if (s.state === 'joined' && !s.clientInLevel) lines.push(s.inGame ? 'The host is in a level: you follow it into the next one.' : 'Waiting for the host to start a level...');
+    if (s.state === 'hosting' && players.length < 2) lines.push('Waiting for players (Online co-op on their start page).');
+    panel.innerHTML = lines.join('<br>');
+    // a client waiting for the host's level stays at the main menu (the level start is taken there)
+    gameInput?.setBlocked(s.state === 'joined' && !s.clientInLevel);
+    if (s.levelMenu && !levelDlg.open) levelDlg.showModal();
+    else if (!s.levelMenu && levelDlg.open) levelDlg.close();
+  }, 500);
+}
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);

@@ -95,3 +95,16 @@ web frontend_web.cpp
 # Skipping cutscenes and intro videos: hold B / START / A (keyboard: K / Esc / Space-Enter)
 cpc settings/skip_cinematics.cpp
 web cutscene_stubs.cpp
+
+# Online co-op: crashott-pc's online code (players over the network, room streaming, skins, colours, the
+# session's protocol) on the server's virtual LAN (net_wasm.cpp, tools/netswitch.mjs), the page in place of its
+# MULTIPLAYER screens and of its UPnP / STUN (mp_web.cpp)
+cpc online/mp_core.cpp
+cpc online/mp_lobby.cpp
+cpc online/mp_net.cpp
+cpc online/mp_players.cpp
+cpc online/mp_stream.cpp
+cpc online/mp_skins.cpp
+cpc online/mp_colors.cpp
+web net_wasm.cpp
+web mp_web.cpp

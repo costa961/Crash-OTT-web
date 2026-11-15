@@ -113,6 +113,19 @@ Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the k
 | Start / Back | Esc / Tab |
 | Right stick | numpad 8 4 5 6 |
 
+### Co-op
+
+- **Two players on one PC** (the game's own co-op): with two gamepads the second one is Player 2; with one gamepad and
+  the keyboard, Controls > *the keyboard plays Player 2*. In game Player 2 presses **B** to join (riding in Crash's
+  backpack; Y jumps off).
+- **Online co-op** (crashott-pc's online mode, each player in their own browser, through the server: the local one on
+  your network, or your private server for friends elsewhere): **Online co-op** on the start page. One player hosts
+  (*Host a session*) and plays as usual; a new game goes to the HUB, and every level the host starts takes the others
+  with them. The others pick the host in *Sessions on this server* and wait at the main menu (their buttons are off
+  meanwhile) until the host starts a level. Join while the host is in the menus or at the HUB. Up to 4 players; only
+  the host keeps a save; a panel at the top right shows the players and their ping, and a client's START opens a
+  small menu (Resume / Leave the session). It is crashott-pc's online mode, still a prototype there.
+
 Saves stay in the browser (its storage for this site; Export saves for a copy); the first start copies the
 saves an older build left on the local server (`out/userdata/content`).
 

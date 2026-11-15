@@ -1,7 +1,9 @@
 // The title's frontend for the browser build: the hook on its node-exit evaluation (sub_820F9BA8),
 // reduced from crashott-pc's settings/frontend_hooks.cpp to what the browser build has: the direct
 // boot (settings/direct_boot.cpp: CRASH_SKIP_INTROS skips the logos and the title screen to the main
-// menu). The PC build's own menus, online, Discord and achievements hooks are left out.
+// menu) and the online co-op's flows (online/mp_menu.h, runtime/mp_web.cpp). The PC build's own menus,
+// Discord and achievements hooks are left out.
+#include "online/mp_menu.h"
 #include "settings/direct_boot.h"
 
 #include <ppc_config.h>
@@ -26,6 +28,8 @@ PPC_FUNC(sub_820F9BA8)
     int32_t exit = int32_t(ctx.r3.u32);
     if (t_conditionDepth == 1)
         exit = boot::OverrideExit(ctx, base, tree, node, exit);
+    if (t_conditionDepth == 1)
+        exit = mp::menu::OverrideExit(ctx, base, tree, node, exit);  // online co-op: host / client flows
     ctx.r3.s64 = exit;
     t_conditionDepth--;
 }
