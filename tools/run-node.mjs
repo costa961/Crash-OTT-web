@@ -329,6 +329,9 @@ if (isMainThread) {
   Error.stackTraceLimit = 100;
   const host = {
     register: () => 0,
+    // The WebGPU recorder's control block (runtime/gpu_web/webgpu_proto.h): no page here, so it
+    // stays detached and the recorder drops its records.
+    gpu_register: () => 0,
     now_ms: () => T0 + performance.now(),
     blocked_ms: () => blockedMs,
   };

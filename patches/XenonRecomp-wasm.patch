@@ -9,7 +9,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
  
  #include <x86/avx.h>
  #include <x86/sse.h>
-@@ -24,13 +25,38 @@
+@@ -24,13 +25,51 @@
  #define PPC_JOIN(x, y) x##y
  #define PPC_XSTRINGIFY(x) #x
  #define PPC_STRINGIFY(x) PPC_XSTRINGIFY(x)
@@ -35,6 +35,19 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
 +    uint8_t* operator+(T offset) const { return PPCGuestToHost(uint32_t(offset)); }
 +};
 +
++// No page protection in WebAssembly, so the hardware register windows can't trap stores as on PC
++// (the GPU's at 0x7FC80000, the XMA decoder's at 0x7FEA0000: write-1 kick/lock/clear registers).
++// Every 32-bit guest store into 0x7FC00000-0x7FFFFFFF calls the runtime after it lands
++// (runtime/mmio_wasm.cpp): one compare per store, predicted not taken.
++extern "C" void PPCMmioStore(uint32_t address);
++inline void PPCStoreU32(uint32_t address, uint32_t value)
++{
++    *(volatile uint32_t*)PPCGuestToHost(address) = __builtin_bswap32(value);
++    if ((address >> 22) == 0x1FFu) [[unlikely]]
++        PPCMmioStore(address);
++}
++#define PPC_STORE_U32(x, y) PPCStoreU32(uint32_t(x), uint32_t(y))
++
 +#define PPC_FUNC(x) void x(PPCContext& __restrict ctx, PPCBase base)
 +#define PPC_FUNC_PROLOGUE()
 +#else
@@ -50,7 +63,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
  #ifndef PPC_LOAD_U8
  #define PPC_LOAD_U8(x) *(volatile uint8_t*)(base + (x))
  #endif
-@@ -128,7 +154,11 @@
+@@ -128,7 +167,11 @@
  #define PPC_CALL_INDIRECT_FUNC(x) (PPC_LOOKUP_FUNC(base, x))(ctx, base)
  #endif
  
@@ -62,7 +75,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
  
  struct PPCFuncMapping
  {
-@@ -189,13 +219,20 @@
+@@ -189,13 +232,20 @@
  
      inline void setFromMask(simde__m128 mask, int imm) noexcept
      {
@@ -83,7 +96,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
      inline void setFromMask(simde__m128i mask, int imm) noexcept
      {
          int m = simde_mm_movemask_epi8(mask);
-@@ -204,6 +241,7 @@
+@@ -204,6 +254,7 @@
          eq = m == 0; // none equal
          so = 0;
      }
@@ -91,7 +104,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
  };
  
  union alignas(0x10) PPCVRegister
-@@ -271,6 +309,26 @@
+@@ -271,6 +322,26 @@
          // FPCR is 64 bits wide: a 32-bit operand would leave the register's upper half undefined.
          __asm__ __volatile__("msr fpcr, %0" : : "r"(uint64_t(csr)));
      }
@@ -118,7 +131,7 @@ diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
  #else
  #   error "Missing implementation for FPSCR."
  #endif
-@@ -714,6 +772,15 @@
+@@ -714,6 +785,15 @@
                   : "=r"(ret)::"memory");
      return ret;
  }

@@ -18,6 +18,8 @@ mkdir -p "$OUT/rt"
 CPC="$OUT/cpc-src/runtime"
 rm -rf "$OUT/cpc-src"; mkdir -p "$OUT/cpc-src"
 cp -r "$ROOT/third_party/crashott-pc/runtime" "$OUT/cpc-src/"
+mkdir -p "$OUT/cpc-src/thirdparty"
+cp -r "$ROOT/third_party/crashott-pc/thirdparty/smaa" "$ROOT/third_party/crashott-pc/thirdparty/stb" "$OUT/cpc-src/thirdparty/"
 # A repository of its own: inside this one, git apply would skip (silently) every path outside the
 # current directory.
 (cd "$OUT/cpc-src" && git init -q && git apply --ignore-whitespace "$ROOT/patches/crashott-pc-web.patch") ||
@@ -33,7 +35,7 @@ FEAT="-msimd128 -mbulk-memory -mnontrapping-fptoint -mexception-handling -mllvm 
 DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS -D_WASI_EMULATED_GETPID \
   -DSIMDE_FLOAT16_API=SIMDE_FLOAT16_API_PORTABLE -DCRASH_WEB=1 -DNOMINMAX"
 COMMON="$TARGET $OPT $FEAT $DEFS -include $ROOT/runtime/compat/wasm_compat.h -fno-delete-null-pointer-checks -fno-strict-aliasing -g0"
-INC_RT="-I$ROOT/runtime/compat -I$CPC -I$GEN -I$SIMDE/simde -I$SIMDE"
+INC_RT="-I$ROOT/runtime/compat -I$ROOT/runtime -I$CPC -I$GEN -I$SIMDE/simde -I$SIMDE"
 INC_XU="-I$XU/XenonUtils -I$XU/thirdparty/libmspack/libmspack/mspack -I$XU/thirdparty/tiny-AES-c -I$XU/thirdparty/TinySHA1 -I$SIMDE -DNOMINMAX -w"
 
 compile() { # kind path

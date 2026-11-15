@@ -43,9 +43,16 @@ docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_runtime.sh
 # Headless boot test under Node (no graphics yet)
 docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src crashott-build \
   node --experimental-wasm-exnref tools/run-node.mjs --game /game --timeout 60
+
+# 6. The page
+docker run --rm -v "$PWD:/src" -w /src/web crashott-build bash -c "npm install && node build.mjs"
+
+# 7. Play: the local server, then http://localhost:8080 in Chrome or Edge (WebGPU)
+docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src -p 127.0.0.1:8080:8080 crashott-build \
+  node tools/serve.mjs --game /game --host 0.0.0.0
 ```
 
-The page (WebGPU, audio, input) comes with the next milestones.
+Status: the game boots and draws its first screens; no audio and no input yet.
 
 ## Legal
 

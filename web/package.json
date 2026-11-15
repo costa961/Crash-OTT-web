@@ -1,0 +1,16 @@
+{
+  "name": "crashott-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Crash of the Titans (Xbox 360), recompiled to WebAssembly: the page, its host and the WebGPU executor",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "tsc -p ."
+  },
+  "devDependencies": {
+    "@webgpu/types": "0.1.64",
+    "esbuild": "0.25.10",
+    "typescript": "5.9.3"
+  }
+}

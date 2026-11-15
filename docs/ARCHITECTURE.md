@@ -103,6 +103,18 @@ at its end, which here belongs to the guest.
    (`runtime/stubs.cpp`): in 120 s the title runs 3,660 frames at its 30 fps (2 vblanks per swap), every
    swap packet executed by the command processor, ~10,000 interrupts delivered, and opens the Bink shaders
    for its intro movies.
-4. **WebGPU renderer**: `rhi::Device` on WebGPU, Xenos → WGSL; menus on screen.
+4. **WebGPU renderer** — first frames on screen. crashott-pc's renderer (`xenos_renderer.cpp`, texture decode,
+   resolves, EDRAM targets) runs unchanged on a recorder `rhi::Device` (`runtime/gpu_web/rhi_webgpu.cpp`,
+   contract `webgpu_proto.h`): every call is a record in a command ring in shared memory, resources are
+   numbered on the game side, and the upload ring (vertex data, indices, constants, texture levels) is
+   mirrored into one GPU buffer per batch. The page replays it (`web/src/gpu/executor.ts`) on the main
+   thread, one batch boundary at a time per animation frame (the canvas texture is only valid in its task).
+   Draw shaders come from the WGSL translator (`runtime/gpu_web/shader_translator_wgsl.cpp`, a fork of
+   crashott-pc's; 61/61 shaders of the corpus validate with naga: `tools/shader_test.sh`); the built-in
+   passes (resolve, packed depth resolve, depth alias, present, FXAA) are WGSL ports in `web/src/gpu/passes.ts`.
+   No geometry shaders: the renderer's own rectangle-list expansion (its Mali path). Not done yet: depth /
+   stencil views sampled by draws, SMAA, the lighting remaster, the overlay, viewports outside their target.
+   Headless check: `tools/shot.mjs` in GTA SA web's browser image, server and Chrome in one container
+   (`?offscreen=1`: SwiftShader can't allocate a canvas swap chain there, frames are read back to a 2D canvas).
 5. **Audio, input, saves** (OPFS / IndexedDB).
 6. **Performance and polish**, deploy (Caddy + Docker, as GTA SA web).

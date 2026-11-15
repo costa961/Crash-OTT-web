@@ -37,3 +37,72 @@ diff --git a/runtime/gpu/d3d_native.cpp b/runtime/gpu/d3d_native.cpp
      {
          static std::atomic<uint64_t> s_checked, s_mismatches;
          PPCContext saved = ctx;
+diff --git a/runtime/gpu/xenos_renderer.cpp b/runtime/gpu/xenos_renderer.cpp
+--- a/runtime/gpu/xenos_renderer.cpp
++++ b/runtime/gpu/xenos_renderer.cpp
+@@ -26,6 +26,9 @@
+ #include "gpu.h"
+ #include "rhi.h"
+ #include "shader_warmup.h"
++#if defined(CRASH_WEB)
++#include "gpu_web/shader_translator_wgsl.h"  // WebGPU: the WGSL translator (runtime/gpu_web)
++#endif
+ #include "smaa.h"
+ #include "upscaler.h"
+ #include "texture_watch.h"
+@@ -543,7 +546,11 @@
+             if (!entry->translated)
+             {
+                 entry->translated = true;
++#if defined(CRASH_WEB)
++                entry->info = wgsl::TranslateShader(entry->info.stage, entry->ucode.data(), uint32_t(entry->ucode.size()));
++#else
+                 entry->info = TranslateShader(entry->info.stage, entry->ucode.data(), uint32_t(entry->ucode.size()));
++#endif
+                 char name[64];
+                 snprintf(name, sizeof(name), "%s_%016llx", entry->info.stage == ShaderStage::Pixel ? "ps" : "vs", (unsigned long long)entry->info.hash);
+                 if (const char* patch = graphics::PatchShader(entry->info.stage, entry->info.hash, entry->info.hlsl))
+diff --git a/runtime/audio/xma.cpp b/runtime/audio/xma.cpp
+--- a/runtime/audio/xma.cpp
++++ b/runtime/audio/xma.cpp
+@@ -1022,3 +1022,18 @@
+         memset(g_memory.Translate(h.guest), 0, CONTEXT_SIZE);
+     }
+ }
++
++#if defined(CRASH_WEB)
++namespace xma
++{
++    // WebAssembly has no write trap: the recompiled code calls this (runtime/mmio_wasm.cpp) after a
++    // 32-bit store to the register window has landed, the same report XmaMmioHandler makes on PC.
++    void OnGuestStore(uint32_t guest)
++    {
++        if (guest < TRAPPED_PAGE || guest >= TRAPPED_PAGE + 0x1000)
++            return;
++        guest &= ~3u;
++        OnRegisterWrite((guest - XMA_MMIO_BEGIN) / 4, *reinterpret_cast<uint32_t*>(g_memory.Translate(guest)));
++    }
++}
++#endif
+diff --git a/runtime/gpu/gpu.cpp b/runtime/gpu/gpu.cpp
+--- a/runtime/gpu/gpu.cpp
++++ b/runtime/gpu/gpu.cpp
+@@ -461,3 +461,18 @@
+         g_executedSwaps++;
+     }
+ }
++
++#if defined(CRASH_WEB)
++namespace gpu
++{
++    // WebAssembly (runtime/mmio_wasm.cpp): a guest store to the first register page has landed, the
++    // report MmioHandler makes on PC (wakes the command processor on CP_RB_WPTR).
++    void OnGuestStore(uint32_t guest)
++    {
++        if (guest < GPU_MMIO_BEGIN || guest >= GPU_MMIO_BEGIN + 0x1000)
++            return;
++        guest &= ~3u;
++        OnGuestRegisterWrite((guest - GPU_MMIO_BEGIN) / 4, LoadBE32(guest));
++    }
++}
++#endif

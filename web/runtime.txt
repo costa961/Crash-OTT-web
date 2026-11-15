@@ -20,6 +20,7 @@ cpc kernel/xam_notify_imports.cpp
 cpc kernel/xam_user_imports.cpp
 cpc kernel/xam_content_imports.cpp
 cpc kernel/xex_loader.cpp
+cpc kernel/xmsg_imports.cpp
 cpc fs/vfs.cpp
 cpc fs/rcf_overlay.cpp
 cpc fs/xenon_drive_hooks.cpp
@@ -36,6 +37,8 @@ cpc gpu/video_imports.cpp
 cpc gpu/ring_buffer_hook.cpp
 cpc gpu/tiling_hooks.cpp
 cpc gpu/d3d_native.cpp
+cpc gpu/shader_translator.cpp
+web gpu_web/shader_translator_wgsl.cpp
 
 # XEX decryption (crashott-pc's XexImage target)
 cpc xex_image/xex_image.cpp
@@ -53,3 +56,29 @@ web sbrk.c
 web diagnostics_wasm.cpp
 web main_wasm.cpp
 web stubs.cpp
+
+# Renderer (API-agnostic part) on the WebGPU recorder (runtime/gpu_web/rhi_webgpu.cpp)
+cpc gpu/xenos_renderer.cpp
+cpc gpu/texture_decode.cpp
+cpc gpu/rhi_common.cpp
+cpc gpu/widescreen.cpp
+cpc gpu/graphics_options.cpp
+cpc gpu/texture_watch.cpp
+cpc gpu/png_writer.cpp
+cpc gpu/smaa.cpp
+cpc gpu/lighting.cpp
+cpc gpu/overlay.cpp
+cpc gpu/hd_textures.cpp
+cpc gpu/shader_warmup.cpp
+web gpu_web/rhi_webgpu.cpp
+web renderer_stubs.cpp
+
+# Audio: XAudio / XMA imports, the XMA decoder (contexts and kicks; no FFmpeg yet: silence), the mixer
+cpc kernel/audio_imports.cpp
+cpc audio/xma.cpp
+cpc audio/audio_output.cpp
+cpc audio/audio_override.cpp
+cpc audio/game_volumes.cpp
+cpc audio/wav_writer.cpp
+web audio_device_null.cpp
+web mmio_wasm.cpp
