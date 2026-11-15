@@ -117,6 +117,12 @@ async function start(audio: AudioContext) {
   env.CRASHOTT_MOTION_BLUR ??= String(gfx.mb);
   env.CRASHOTT_DEPTH_OF_FIELD ??= String(gfx.dof);
   env.CRASHOTT_SHADOW_SOFTNESS ??= String(gfx.sh);
+  env.CRASHOTT_SSAO ??= gfx.ssao;
+  env.CRASHOTT_GI ??= gfx.gi ? '1' : '0';
+  env.CRASHOTT_GI_INTENSITY ??= String(gfx.giI);
+  env.CRASHOTT_CONTACT_SHADOWS ??= gfx.contact ? '1' : '0';
+  env.CRASHOTT_SOFT_SHADOWS ??= gfx.soft ? '1' : '0';
+  env.CRASHOTT_FPS ??= opt60.checked ? '60' : '30';
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
@@ -184,6 +190,8 @@ function rememberedSwitch(id: string, key: string): HTMLInputElement {
 }
 // no logo videos, no title screen: straight to the main menu (crashott-pc's settings/direct_boot.cpp)
 const optSkip = rememberedSwitch('optSkip', 'crashott-skip-intros');
+// 60 fps instead of the original 30 (crashott-pc's frame limit, gpu::SetFrameLimit)
+const opt60 = rememberedSwitch('opt60', 'crashott-60fps');
 
 // ---- full screen: F, or a double-click on the game ----
 function toggleFullscreen() {
@@ -239,8 +247,9 @@ controlsDlg.addEventListener('cancel', e => { if (waiting) { e.preventDefault();
 (document.getElementById('keysDone') as HTMLButtonElement).onclick = () => controlsDlg.close();
 
 // ---- Graphics: anti-aliasing and crashott-pc's shader options, remembered in this browser ----
-interface Graphics { aa: string; mb: number; dof: number; sh: number }
-const GRAPHICS_DEFAULT: Graphics = { aa: 'off', mb: 100, dof: 100, sh: 100 };
+// and the lighting remaster (crashott-pc's settings.h [lighting]), all off by default
+interface Graphics { aa: string; mb: number; dof: number; sh: number; ssao: string; gi: boolean; giI: number; contact: boolean; soft: boolean }
+const GRAPHICS_DEFAULT: Graphics = { aa: 'off', mb: 100, dof: 100, sh: 100, ssao: 'off', gi: false, giI: 100, contact: false, soft: false };
 function loadGraphics(): Graphics {
   try { return { ...GRAPHICS_DEFAULT, ...JSON.parse(localStorage.getItem('crashott-graphics') ?? '{}') as Partial<Graphics> }; }
   catch { return { ...GRAPHICS_DEFAULT }; }
@@ -251,18 +260,32 @@ const gfxEls = {
   mb: [document.getElementById('optMb') as HTMLInputElement, document.getElementById('mbVal') as HTMLOutputElement],
   dof: [document.getElementById('optDof') as HTMLInputElement, document.getElementById('dofVal') as HTMLOutputElement],
   sh: [document.getElementById('optSh') as HTMLInputElement, document.getElementById('shVal') as HTMLOutputElement],
+  giI: [document.getElementById('optGiI') as HTMLInputElement, document.getElementById('giVal') as HTMLOutputElement],
+  ssao: document.getElementById('optSsao') as HTMLSelectElement,
+  gi: document.getElementById('optGi') as HTMLInputElement,
+  contact: document.getElementById('optContact') as HTMLInputElement,
+  soft: document.getElementById('optSoft') as HTMLInputElement,
 } as const;
+const PERCENTS = ['mb', 'dof', 'sh', 'giI'] as const;
+const SWITCHES = ['gi', 'contact', 'soft'] as const;
 function showGraphics(g: Graphics) {
   gfxEls.aa.value = g.aa;
-  for (const k of ['mb', 'dof', 'sh'] as const) { gfxEls[k][0].value = String(g[k]); gfxEls[k][1].value = `${g[k]}%`; }
+  gfxEls.ssao.value = g.ssao;
+  for (const k of PERCENTS) { gfxEls[k][0].value = String(g[k]); gfxEls[k][1].value = `${g[k]}%`; }
+  for (const k of SWITCHES) gfxEls[k].checked = g[k];
+  gfxEls.giI[0].disabled = !g.gi;
 }
 function storeGraphics() {
-  const g: Graphics = { aa: gfxEls.aa.value, mb: Number(gfxEls.mb[0].value), dof: Number(gfxEls.dof[0].value), sh: Number(gfxEls.sh[0].value) };
+  const g: Graphics = {
+    aa: gfxEls.aa.value, mb: Number(gfxEls.mb[0].value), dof: Number(gfxEls.dof[0].value), sh: Number(gfxEls.sh[0].value),
+    ssao: gfxEls.ssao.value, gi: gfxEls.gi.checked, giI: Number(gfxEls.giI[0].value), contact: gfxEls.contact.checked, soft: gfxEls.soft.checked,
+  };
   try { localStorage.setItem('crashott-graphics', JSON.stringify(g)); } catch { /* no storage */ }
   showGraphics(g);
 }
-gfxEls.aa.onchange = storeGraphics;
-for (const k of ['mb', 'dof', 'sh'] as const) gfxEls[k][0].oninput = storeGraphics;
+gfxEls.aa.onchange = gfxEls.ssao.onchange = storeGraphics;
+for (const k of PERCENTS) gfxEls[k][0].oninput = storeGraphics;
+for (const k of SWITCHES) gfxEls[k].onchange = storeGraphics;
 (document.getElementById('graphicsBtn') as HTMLButtonElement).onclick = () => { showGraphics(loadGraphics()); graphicsDlg.showModal(); };
 (document.getElementById('gfxReset') as HTMLButtonElement).onclick = () => { showGraphics(GRAPHICS_DEFAULT); storeGraphics(); };
 (document.getElementById('gfxDone') as HTMLButtonElement).onclick = () => graphicsDlg.close();

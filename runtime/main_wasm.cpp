@@ -85,8 +85,8 @@ int main(int argc, char** argv)
     vfs::Init(vfs::Config{ g_game, g_mods, g_userData });
     StartWatchdog();
 
-    // The start page's graphics options (crashott-pc's settings.h [graphics]): anti-aliasing and the
-    // three shader options in % (runtime/gpu_web/graphics_options_wgsl.cpp).
+    // The start page's graphics options (crashott-pc's settings.h [graphics] and [lighting]): anti-aliasing,
+    // the three shader options in % (runtime/gpu_web/graphics_options_wgsl.cpp), frame limit, lighting.
     {
         settings::Values values = settings::Get();
         if (const char* aa = getenv("CRASHOTT_AA"))
@@ -99,10 +99,26 @@ int main(int argc, char** argv)
         percent("CRASHOTT_MOTION_BLUR", values.motionBlur);
         percent("CRASHOTT_DEPTH_OF_FIELD", values.depthOfField);
         percent("CRASHOTT_SHADOW_SOFTNESS", values.shadowSoftness);
+        // Frame limit (gpu::SetFrameLimit, applied by gpu::Init): 30 (the original) or 60.
+        if (const char* fps = getenv("CRASHOTT_FPS"))
+            values.fpsLimit = atoi(fps) == 60 ? 60 : 30;
+        // [lighting]: the lighting remaster (web/src/gpu/lighting.ts) and the soft shadows.
+        auto flag = [](const char* name, bool& field) {
+            if (const char* text = getenv(name))
+                field = !strcmp(text, "1");
+        };
+        if (const char* ao = getenv("CRASHOTT_SSAO"))
+            values.ssao = !strcmp(ao, "high") ? settings::AoQuality::High : !strcmp(ao, "low") ? settings::AoQuality::Low : settings::AoQuality::Off;
+        flag("CRASHOTT_GI", values.gi);
+        percent("CRASHOTT_GI_INTENSITY", values.giIntensity);
+        flag("CRASHOTT_CONTACT_SHADOWS", values.contactShadows);
+        flag("CRASHOTT_SOFT_SHADOWS", values.softShadows);
         settings::Set(values);
-        Log("[main] graphics: anti-aliasing %s, motion blur %d%%, depth of field %d%%, shadow softness %d%%",
+        Log("[main] graphics: anti-aliasing %s, motion blur %d%%, depth of field %d%%, shadow softness %d%%, %d fps",
             values.antiAliasing == settings::AntiAliasing::Smaa ? "SMAA" : values.antiAliasing == settings::AntiAliasing::Fxaa ? "FXAA" : "off",
-            values.motionBlur, values.depthOfField, values.shadowSoftness);
+            values.motionBlur, values.depthOfField, values.shadowSoftness, values.fpsLimit);
+        Log("[main] lighting: SSAO %s, GI %s (%d%%), contact shadows %s, soft shadows %s", settings::AoQualityName(values.ssao),
+            values.gi ? "on" : "off", values.giIntensity, values.contactShadows ? "on" : "off", values.softShadows ? "on" : "off");
     }
 
     // No page protection in WebAssembly: crashott-pc's texture write watch (gpu/texture_watch.h) would

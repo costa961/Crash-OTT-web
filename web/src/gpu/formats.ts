@@ -62,3 +62,15 @@ export function formatOf(dxgi: number, features: ReadonlySet<string>): FormatInf
   }
   return info;
 }
+
+/** The format of a texture the renderer draws into: 8-bit snorm is renderable only with
+ *  texture-formats-tier1 (the lighting remaster's normals are R8G8B8A8_SNORM render targets), so
+ *  without it such a target is the 16-bit float format with the same channels (same values). */
+export function renderTargetFormatOf(dxgi: number, features: ReadonlySet<string>): FormatInfo | null {
+  const info = formatOf(dxgi, features);
+  if (!info || features.has('texture-formats-tier1')) return info;
+  if (info.format === 'r8snorm') return F('r16float', 2);
+  if (info.format === 'rg8snorm') return F('rg16float', 4);
+  if (info.format === 'rgba8snorm') return F('rgba16float', 8);
+  return info;
+}

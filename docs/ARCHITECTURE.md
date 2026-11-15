@@ -113,7 +113,7 @@ at its end, which here belongs to the guest.
    crashott-pc's; 61/61 shaders of the corpus validate with naga: `tools/shader_test.sh`); the built-in
    passes (resolve, packed depth resolve, depth alias, present, FXAA) are WGSL ports in `web/src/gpu/passes.ts`.
    No geometry shaders: the renderer's own rectangle-list expansion (its Mali path). Not done yet: depth /
-   stencil views sampled by draws, SMAA, the lighting remaster, the overlay, viewports outside their target.
+   stencil views sampled by draws, the overlay, viewports outside their target.
    Headless check: `tools/shot.mjs` in GTA SA web's browser image, server and Chrome in one container
    (`?offscreen=1`: SwiftShader can't allocate a canvas swap chain there, frames are read back to a 2D canvas).
 5. **Audio, input, saves, data** — done.
@@ -134,7 +134,8 @@ at its end, which here belongs to the guest.
      synchronous, so each game-thread worker posts its request and waits on a reply word (`Atomics.wait`).
    - Texture write watch off (`CRASH_TEXTURE_WATCH=0`): it relies on page protection, which WebAssembly lacks;
      the renderer hashes textures instead (CPU-updated textures: the Bink videos, dynamic UI).
-6. **Performance** — 30 fps in game (the original rate). The fix that mattered: the WebGPU device's pipeline cache
+6. **Performance** — 30 fps in game (the original rate); 60 with `CRASHOTT_FPS=60` (the start page's 60 FPS mode:
+   crashott-pc's `gpu::SetFrameLimit`, paced in VdSwap). The fix that mattered: the WebGPU device's pipeline cache
    hashed `DrawPipelineKey` with its padding, which the renderer's copies leave undefined, so every draw made a
    new pipeline; keys are normalized now (`Normalized` in `rhi_webgpu.cpp`).
 
@@ -149,8 +150,13 @@ at its end, which here belongs to the guest.
   frontend's EXIT GAME exit, which the browser build doesn't add; `settings::QuitExit` answers the retail value.
 - Graphics options: crashott-pc's motion blur, depth of field and shadow softness patches are ported to the WGSL
   shaders (`runtime/gpu_web/graphics_options_wgsl.cpp`, validated by `tools/shader_test.sh`), set from the start page
-  (`CRASHOTT_MOTION_BLUR` / `_DEPTH_OF_FIELD` / `_SHADOW_SOFTNESS`, `runtime/main_wasm.cpp`). Not ported: the soft
-  shadows of the lighting remaster, and the lighting remaster and overlay passes themselves.
+  (`CRASHOTT_MOTION_BLUR` / `_DEPTH_OF_FIELD` / `_SHADOW_SOFTNESS`, `runtime/main_wasm.cpp`), with the lighting
+  remaster's soft shadows (`CRASHOTT_SOFT_SHADOWS`, a branch of the shadow shader).
+- Lighting remaster (`CRASHOTT_SSAO` = off / low / high, `CRASHOTT_GI`, `_GI_INTENSITY`, `CRASHOTT_CONTACT_SHADOWS`):
+  crashott-pc's lighting and motion-vector passes in WGSL (`web/src/gpu/lighting.ts`, validated with naga); its
+  rgba8snorm normal target falls back to rgba16float without `texture-formats-tier1` (`renderTargetFormatOf`). It
+  runs only on 3D scenes with a perspective camera, so the headless test (menus) doesn't exercise it.
+- Overlay passes (crashott-pc's settings menu / stats overlay): not ported.
 - SMAA (`CRASHOTT_AA=smaa`): crashott-pc's three passes in WGSL (`web/src/gpu/smaa.ts`, SMAA 1x, preset high).
 - Firefox and Safari: untested (WebGPU, wasm exception handling with exnref).
 - Linear memory grows to 3 GB, because the title allocates all 512 MB of physical memory at `0xA0000000` and up

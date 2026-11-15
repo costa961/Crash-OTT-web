@@ -2,9 +2,11 @@
 // DEPTH_ALIAS_PS, PRESENT_PS, FXAA_PS; MIT, VitoMiguelF and contributors), found by the name the
 // renderer gives them. Same constant layouts as the HLSL cbuffers. Pass layout: @binding(0) the
 // constants, textures from @binding(1), samplers s0/s1 at @binding(9)/@binding(10). The full-screen
-// triangle is the vertex stage of every pass. SMAA's three passes are in smaa.ts.
+// triangle is the vertex stage of every pass. SMAA's three passes are in smaa.ts, the lighting remaster's
+// (and the motion vectors it reads) in lighting.ts.
 
 import { SMAA_PASS_PS } from './smaa';
+import { LIGHTING_PASS_PS } from './lighting';
 
 export const FULLSCREEN_VS = /* wgsl */ `
 @vertex fn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {
@@ -128,6 +130,7 @@ export const PASS_PS: Record<string, string> = {
   present: PRESENT,
   fxaa: FXAA,
   ...SMAA_PASS_PS,
+  ...LIGHTING_PASS_PS,
 };
 
 /** Draw-layout shaders the renderer creates from HLSL of its own, by name. */

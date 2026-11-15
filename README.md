@@ -64,10 +64,12 @@ On the start page:
   fast loads. Without it the game reads them from the local server.
 - **Skip intro videos**: no logo videos, no legal-text wait, no title screen: straight to the main menu.
 - **FPS counter**: on/off.
+- **60 FPS mode**: 60 fps instead of the original 30 (crashott-pc's frame limit); needs a fast enough PC.
 - **Controls**: the keyboard bindings, one key per pad input (click one, press the new key; Reset for the
   defaults below). Enter is always A too.
 - **Graphics**: anti-aliasing (off, FXAA, SMAA) and crashott-pc's motion blur, depth of field and shadow
-  softness (0-200 %, 100 % = the game's own look).
+  softness (0-200 %, 100 % = the game's own look); its lighting remaster: ambient occlusion (off, low, high),
+  indirect light (GI) and its intensity, contact shadows, soft shadows (all off = the game's own look).
 - **Download logs**: the log of the last session and of this one (to report a problem).
 
 A browser that lacks something the game needs (WebGPU, cross-origin isolation, WebAssembly exception

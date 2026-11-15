@@ -8,7 +8,7 @@
 //   system constants, vertex / pixel float constants, effect constants (dynamic offsets into the ring)
 //   and the ring as vertex data; group 1 = texture N at binding N, its sampler at 32 + N.
 // - The built-in passes' HLSL is replaced by passes.ts's WGSL of the same name.
-import { formatOf, type FormatInfo } from './formats';
+import { formatOf, renderTargetFormatOf, type FormatInfo } from './formats';
 import { CLEAR_COLOR_PS, DEPTH_COPY_PS, DRAW_PS, FULLSCREEN_VS, PASS_PS } from './passes';
 
 // webgpu_proto.h
@@ -286,9 +286,11 @@ export class Executor {
 
   // ---- resources ----
   private createTexture(id: number, width: number, height: number, levels: number, dxgi: number, renderDxgi: number, usage: number) {
-    const info = formatOf(dxgi, this.features);
+    // A render target's format may differ (renderTargetFormatOf: 8-bit snorm without texture-formats-tier1).
+    const fmtOf = usage & USAGE_RENDER_TARGET ? renderTargetFormatOf : formatOf;
+    const info = fmtOf(dxgi, this.features);
     if (!info) { this.warn(`fmt${dxgi}`, `texture format DXGI ${dxgi} has no WebGPU equivalent here`); return; }
-    const render = renderDxgi ? formatOf(renderDxgi, this.features) : null;
+    const render = renderDxgi ? fmtOf(renderDxgi, this.features) : null;
     let flags = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC;
     if (usage & (USAGE_RENDER_TARGET | USAGE_DEPTH_STENCIL)) flags |= GPUTextureUsage.RENDER_ATTACHMENT;
     // A BC texture's size rounds up to whole blocks at level 0 (WebGPU requires it).
@@ -313,7 +315,7 @@ export class Executor {
       if (kind === 1) v = t.texture.createView({ aspect: 'depth-only' });
       else if (kind === 2) v = t.texture.createView({ aspect: 'stencil-only' });
       else if (kind === 3) {
-        const render = formatOf(t.renderDxgi, this.features);
+        const render = renderTargetFormatOf(t.renderDxgi, this.features);
         v = t.texture.createView({ format: render?.format ?? t.info.format, baseMipLevel: 0, mipLevelCount: 1 });
       } else v = t.texture.createView();
       t.views.set(key, v);
@@ -411,7 +413,7 @@ export class Executor {
     const pass = enc.beginRenderPass({ colorAttachments: [{ view, loadOp: full ? 'clear' : 'load', storeOp: 'store',
       clearValue: { r: color[0], g: color[1], b: color[2], a: color[3] } }] });
     if (!full) {
-      const fmt = t ? (formatOf(t.renderDxgi, this.features)?.format ?? t.info.format) : this.presentFormat;
+      const fmt = t ? (renderTargetFormatOf(t.renderDxgi, this.features)?.format ?? t.info.format) : this.presentFormat;
       const r = this.clampRect(rect!, width, height);
       if (r) {
         pass.setPipeline(this.clearPipeline('color', fmt));
@@ -498,7 +500,7 @@ export class Executor {
     if (!vs?.module || (ps && !ps.module)) return;
     const targets: (GPUColorTargetState | null)[] = [];
     for (let i = 0; i < colorCount; i++) {
-      const fmt = colorFormats[i] ? formatOf(colorFormats[i], this.features) : null;
+      const fmt = colorFormats[i] ? renderTargetFormatOf(colorFormats[i], this.features) : null;
       if (!fmt) { targets.push(null); continue; }
       const c = blend[i];
       const cs = c & 0x1F, co = (c >> 5) & 7, cd = (c >> 8) & 0x1F, as = (c >> 16) & 0x1F, ao = (c >> 21) & 7, ad = (c >> 24) & 0x1F;
@@ -592,7 +594,7 @@ export class Executor {
     if (!code) { this.warn(`pass:${name}`, `pass ${name} has no WGSL (skipped)`); return; }
     const formats: GPUColorTargetState[] = [];
     for (let i = 0; i < targetCount; i++) {
-      const fmt = targets[i] === 87 ? this.presentFormat : formatOf(targets[i], this.features)?.format;
+      const fmt = targets[i] === 87 ? this.presentFormat : renderTargetFormatOf(targets[i], this.features)?.format;
       if (!fmt) return;
       formats.push({ format: fmt, blend: blend === 1 ? { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
         alpha: { srcFactor: 'zero', dstFactor: 'one' } } : undefined });

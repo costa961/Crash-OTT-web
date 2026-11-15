@@ -55,6 +55,8 @@
   .dlgbar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
   .dlgnote { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   .setting { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 14px; }
+  dialog h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .setting-switch { justify-content: space-between; margin: 6px 0; }
   .setting input[type="range"] { grid-column: 1 / -1; accent-color: var(--accent); }
 </style>
 </head>
@@ -73,6 +75,7 @@
   </div>
   <label class="switch">Skip intro videos <input type="checkbox" id="optSkip" role="switch"></label>
   <label class="switch">FPS counter <input type="checkbox" id="optFps" role="switch"></label>
+  <label class="switch" title="The game runs at 30 fps on the console; 60 fps needs a fast enough PC">60 FPS mode <input type="checkbox" id="opt60" role="switch"></label>
   <div class="row">
     <button id="controlsBtn" class="secondary">Controls</button>
     <button id="graphicsBtn" class="secondary">Graphics</button>
@@ -92,7 +95,13 @@
   <label class="setting">Motion blur <output id="mbVal"></output><input type="range" id="optMb" min="0" max="200" step="10"></label>
   <label class="setting">Depth of field <output id="dofVal"></output><input type="range" id="optDof" min="0" max="200" step="10"></label>
   <label class="setting">Shadow softness <output id="shVal"></output><input type="range" id="optSh" min="0" max="200" step="10"></label>
-  <p class="dlgnote">100% is the game's own look. Applied when the game starts.</p>
+  <h3>Lighting (remaster)</h3>
+  <label class="setting">Ambient occlusion <select id="optSsao"><option value="off">Off</option><option value="low">Low</option><option value="high">High</option></select></label>
+  <label class="switch setting-switch">Indirect light (GI) <input type="checkbox" id="optGi" role="switch"></label>
+  <label class="setting">GI intensity <output id="giVal"></output><input type="range" id="optGiI" min="0" max="200" step="10"></label>
+  <label class="switch setting-switch">Contact shadows <input type="checkbox" id="optContact" role="switch"></label>
+  <label class="switch setting-switch">Soft shadows <input type="checkbox" id="optSoft" role="switch"></label>
+  <p class="dlgnote">100% and everything off is the game's own look. Applied when the game starts.</p>
   <div class="dlgbar"><button id="gfxReset" class="secondary">Reset</button><button id="gfxDone">Done</button></div>
 </dialog>
 <div id="status"></div>
