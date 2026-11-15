@@ -22,7 +22,8 @@ rm -f "$OUT"/*.hlsl "$OUT"/*.wgsl "$OUT"/*.naga.txt
 echo "== build"
 clang++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter \
     -I"$CPC" -Iruntime \
-    tools/shader_test.cpp runtime/gpu_web/shader_translator_wgsl.cpp "$CPC/gpu/shader_translator.cpp" \
+    tools/shader_test.cpp runtime/gpu_web/shader_translator_wgsl.cpp runtime/gpu_web/graphics_options_wgsl.cpp \
+    "$CPC/gpu/shader_translator.cpp" \
     -o "$OUT/shader_test"
 
 echo "== translate"

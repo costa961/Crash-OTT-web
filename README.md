@@ -64,13 +64,20 @@ On the start page:
   fast loads. Without it the game reads them from the local server.
 - **Skip intro videos**: no logo videos, no legal-text wait, no title screen: straight to the main menu.
 - **FPS counter**: on/off.
+- **Controls**: the keyboard bindings, one key per pad input (click one, press the new key; Reset for the
+  defaults below). Enter is always A too.
+- **Graphics**: anti-aliasing (off, FXAA, SMAA) and crashott-pc's motion blur, depth of field and shadow
+  softness (0-200 %, 100 % = the game's own look).
 - **Download logs**: the log of the last session and of this one (to report a problem).
+
+A browser that lacks something the game needs (WebGPU, cross-origin isolation, WebAssembly exception
+handling) is told so on the start page, and Start stays off.
 
 In game: **F** or a double-click toggles full screen (F11 works too). Switching to another tab or minimizing
 the window pauses the game until you come back. **Hold B, Start or A** (keyboard: K, Esc, Space / Enter) for a
-moment to skip a cutscene or an intro video (crashott-pc's skipper; its on-screen prompt is not drawn yet).
+moment to skip a cutscene or an intro video: a prompt at the bottom right fills while you hold.
 
-Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the keyboard as pad 1:
+Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the keyboard as pad 1 (defaults):
 
 | Pad | Keyboard |
 |---|---|

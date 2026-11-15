@@ -453,6 +453,17 @@ namespace
     }
 }
 
+// diagnostics.h's Log, for graphics_options_wgsl.cpp
+#include <cstdarg>
+void Log(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    printf("\n");
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 3)
@@ -474,6 +485,9 @@ int main(int argc, char** argv)
     {
         gpu::TranslatedShader hlsl = gpu::TranslateShader(shader.stage, shader.ucode.data(), uint32_t(shader.ucode.size()));
         gpu::TranslatedShader wgsl = gpu::wgsl::TranslateShader(shader.stage, shader.ucode.data(), uint32_t(shader.ucode.size()));
+        // the graphics options' edits, as the renderer applies them (runtime/gpu_web/graphics_options_wgsl.cpp)
+        if (const char* option = gpu::wgsl::PatchShader(wgsl.stage, wgsl.hash, wgsl.hlsl))
+            printf("  %s: graphics option \"%s\" applied\n", shader.name.c_str(), option);
         WriteFile(outDir / (shader.name + ".hlsl"), hlsl.hlsl);
         WriteFile(outDir / (shader.name + ".wgsl"), wgsl.hlsl);
         bool same = hlsl.colorTargetsWritten == wgsl.colorTargetsWritten && hlsl.writesDepth == wgsl.writesDepth &&

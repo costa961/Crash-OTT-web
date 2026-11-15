@@ -6,7 +6,7 @@
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
 import { IO_REPLY_BYTES } from './host/io-proto';
 import { Executor } from './gpu/executor';
-import { attachInput } from './input';
+import { ACTIONS, attachInput, DEFAULT_BINDINGS, keyName, loadBindings, RESERVED_KEYS, saveBindings, type Action } from './input';
 import { cacheState, fmtBytes, LANGUAGES } from './host/gamecache';
 import type { FromDownload } from './host/download-worker';
 
@@ -112,6 +112,11 @@ async function start(audio: AudioContext) {
   for (const kv of q.getAll('env')) { const [k, ...v] = kv.split('='); env[k] = v.join('='); }
   env.CRASHOTT_LANGUAGE ??= languageSel.value;
   if (optSkip.checked) env.CRASH_SKIP_INTROS ??= '1';
+  const gfx = loadGraphics();
+  env.CRASHOTT_AA ??= gfx.aa;
+  env.CRASHOTT_MOTION_BLUR ??= String(gfx.mb);
+  env.CRASHOTT_DEPTH_OF_FIELD ??= String(gfx.dof);
+  env.CRASHOTT_SHADOW_SOFTNESS ??= String(gfx.sh);
   const cfg: BootConfig = { args: ['crashott', '--game', '/game', '--userdata', '/userdata'], env };
   let ready = 0, executor: Executor | null = null;
   const t0 = performance.now();
@@ -140,7 +145,7 @@ async function start(audio: AudioContext) {
             try { executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log }); startFps(() => executor?.framesPresented ?? 0); }
             catch (e) { fail(String(e)); }
             break;
-          case 'input': attachInput(memory, m.block, log); break;
+          case 'input': attachInput(memory, m.block, log, { skipPrompt: document.getElementById('skip') }); break;
           case 'audio':
             audio.audioWorklet.addModule(new URL('./audio-worklet.js', import.meta.url)).then(() => {
               const node = new AudioWorkletNode(audio, 'crash-audio', { numberOfInputs: 0, outputChannelCount: [2],
@@ -189,6 +194,99 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyF' && !e.repeat && !stageEl.hidden) { e.preventDefault(); toggleFullscreen(); }
 });
 stageEl.addEventListener('dblclick', toggleFullscreen);
+
+// ---- Controls: the keyboard bindings (input.ts), remembered in this browser ----
+const controlsDlg = document.getElementById('controlsDlg') as HTMLDialogElement;
+const keytable = document.getElementById('keytable') as HTMLDivElement;
+let bindings = loadBindings();
+let waiting: { action: Action; button: HTMLButtonElement } | null = null;
+function drawControls() {
+  keytable.replaceChildren();
+  for (const [action, label] of ACTIONS) {
+    const name = document.createElement('span');
+    name.textContent = label;
+    const button = document.createElement('button');
+    button.className = 'secondary';
+    button.textContent = keyName(bindings[action]);
+    button.onclick = () => {
+      if (waiting) waiting.button.classList.remove('waiting');
+      waiting = { action, button };
+      button.classList.add('waiting');
+      button.textContent = 'press a key...';
+    };
+    keytable.append(name, button);
+  }
+}
+controlsDlg.addEventListener('keydown', e => {
+  if (!waiting) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const { action } = waiting;
+  waiting = null;
+  if (e.code !== 'Escape' || action === 'start') {
+    if (RESERVED_KEYS.has(e.code)) { drawControls(); return; }
+    // a key bound elsewhere moves here: the other input gets this one's old key
+    const old = bindings[action];
+    for (const [a] of ACTIONS) if (a !== action && bindings[a] === e.code) bindings[a] = old;
+    bindings[action] = e.code;
+    saveBindings(bindings);
+  }
+  drawControls();
+});
+controlsDlg.addEventListener('cancel', e => { if (waiting) { e.preventDefault(); waiting = null; drawControls(); } });
+(document.getElementById('controlsBtn') as HTMLButtonElement).onclick = () => { bindings = loadBindings(); drawControls(); controlsDlg.showModal(); };
+(document.getElementById('keysReset') as HTMLButtonElement).onclick = () => { bindings = { ...DEFAULT_BINDINGS }; saveBindings(bindings); drawControls(); };
+(document.getElementById('keysDone') as HTMLButtonElement).onclick = () => controlsDlg.close();
+
+// ---- Graphics: anti-aliasing and crashott-pc's shader options, remembered in this browser ----
+interface Graphics { aa: string; mb: number; dof: number; sh: number }
+const GRAPHICS_DEFAULT: Graphics = { aa: 'off', mb: 100, dof: 100, sh: 100 };
+function loadGraphics(): Graphics {
+  try { return { ...GRAPHICS_DEFAULT, ...JSON.parse(localStorage.getItem('crashott-graphics') ?? '{}') as Partial<Graphics> }; }
+  catch { return { ...GRAPHICS_DEFAULT }; }
+}
+const graphicsDlg = document.getElementById('graphicsDlg') as HTMLDialogElement;
+const gfxEls = {
+  aa: document.getElementById('optAa') as HTMLSelectElement,
+  mb: [document.getElementById('optMb') as HTMLInputElement, document.getElementById('mbVal') as HTMLOutputElement],
+  dof: [document.getElementById('optDof') as HTMLInputElement, document.getElementById('dofVal') as HTMLOutputElement],
+  sh: [document.getElementById('optSh') as HTMLInputElement, document.getElementById('shVal') as HTMLOutputElement],
+} as const;
+function showGraphics(g: Graphics) {
+  gfxEls.aa.value = g.aa;
+  for (const k of ['mb', 'dof', 'sh'] as const) { gfxEls[k][0].value = String(g[k]); gfxEls[k][1].value = `${g[k]}%`; }
+}
+function storeGraphics() {
+  const g: Graphics = { aa: gfxEls.aa.value, mb: Number(gfxEls.mb[0].value), dof: Number(gfxEls.dof[0].value), sh: Number(gfxEls.sh[0].value) };
+  try { localStorage.setItem('crashott-graphics', JSON.stringify(g)); } catch { /* no storage */ }
+  showGraphics(g);
+}
+gfxEls.aa.onchange = storeGraphics;
+for (const k of ['mb', 'dof', 'sh'] as const) gfxEls[k][0].oninput = storeGraphics;
+(document.getElementById('graphicsBtn') as HTMLButtonElement).onclick = () => { showGraphics(loadGraphics()); graphicsDlg.showModal(); };
+(document.getElementById('gfxReset') as HTMLButtonElement).onclick = () => { showGraphics(GRAPHICS_DEFAULT); storeGraphics(); };
+(document.getElementById('gfxDone') as HTMLButtonElement).onclick = () => graphicsDlg.close();
+
+// ---- what this browser lacks, said before Start (rather than a failure after it) ----
+function compatibility(): string[] {
+  const missing: string[] = [];
+  if (!('gpu' in navigator)) missing.push('WebGPU');
+  if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') missing.push('cross-origin isolation (serve the page with tools/serve.mjs)');
+  // WebAssembly exception handling with exnref (try_table): the module's setjmp/longjmp
+  const exnref = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
+    0x0a, 0x08, 0x01, 0x06, 0x00, 0x1f, 0x40, 0x00, 0x0b, 0x0b]);
+  if (!WebAssembly.validate(exnref)) missing.push('WebAssembly exception handling (exnref)');
+  return missing;
+}
+{
+  const missing = compatibility();
+  if (missing.length) {
+    const el = document.getElementById('compat') as HTMLParagraphElement;
+    el.hidden = false;
+    el.textContent = `This browser can't run the game: it lacks ${missing.join(', ')}. Use a recent Chrome or Edge.`;
+    play.disabled = true;
+  }
+}
 
 // ---- the FPS counter (the start page's "FPS counter") ----
 const optFps = rememberedSwitch('optFps', 'crashott-fps');

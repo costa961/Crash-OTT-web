@@ -142,13 +142,25 @@ at its end, which here belongs to the guest.
 
 - Stencil views sampled by draws: the null texture (depth views are copied to `r32float`); no draw of the menus,
   the videos or the first level samples one (the executor logs "a draw samples a ... texture" when one does).
-- The cutscene skipper's prompt (crashott-pc's `skip_cinematics.cpp`) is drawn with the PC build's menu art, not
-  ported: the hold to skip works, the prompt doesn't show.
+- The cutscene skipper's own prompt (crashott-pc's `skip_cinematics.cpp`) is drawn with the PC build's menu art,
+  not ported; the page draws one instead (`#skip`, `web/src/input.ts`), from `cutscenes::SkipPossible` (written into
+  the input block by `runtime/input_wasm.cpp`) and the hold time of the skip buttons.
 - Skip intro videos (`CRASH_SKIP_INTROS`): crashott-pc's direct boot checks the frontend data through the PC
   frontend's EXIT GAME exit, which the browser build doesn't add; `settings::QuitExit` answers the retail value.
-- crashott-pc's graphics options that patch shaders (motion blur, depth of field, shadow softness): their patches
-  are HLSL and the shaders WGSL, so they are off (the original look); its SMAA, lighting remaster and overlay passes
-  have no WGSL yet.
+- Graphics options: crashott-pc's motion blur, depth of field and shadow softness patches are ported to the WGSL
+  shaders (`runtime/gpu_web/graphics_options_wgsl.cpp`, validated by `tools/shader_test.sh`), set from the start page
+  (`CRASHOTT_MOTION_BLUR` / `_DEPTH_OF_FIELD` / `_SHADOW_SOFTNESS`, `runtime/main_wasm.cpp`). Not ported: the soft
+  shadows of the lighting remaster, and the lighting remaster and overlay passes themselves.
+- SMAA (`CRASHOTT_AA=smaa`): crashott-pc's three passes in WGSL (`web/src/gpu/smaa.ts`, SMAA 1x, preset high).
 - Firefox and Safari: untested (WebGPU, wasm exception handling with exnref).
-- Linear memory grows to 3 GB (commit charge on Windows).
+- Linear memory grows to 3 GB, because the title allocates all 512 MB of physical memory at `0xA0000000` and up
+  (guest address == linear address). That is commit charge, not RAM: pages the game never touches stay zero pages.
+  Lowering it means folding the physical views lower for every runtime access too (`g_memory.Translate` and the
+  `base + guest` of crashott-pc's code), not only the recompiled code's: not done, for a gain of ~0.5 GB of commit.
 - Deploy on a server (Caddy + Docker, as GTA SA web): to do.
+
+## CI
+
+`.github/workflows/ci.yml` checks what needs no game data: the page type-checks and builds, this project's patches
+apply to the pinned XenonRecomp and crashott-pc, the WGSL translator's output validates with naga on the synthetic
+shaders the harness assembles, and the Python tools compile.

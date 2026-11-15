@@ -23,4 +23,8 @@ namespace gpu::wgsl
 {
     // Same result as gpu::TranslateShader, but TranslatedShader::hlsl holds WGSL source.
     TranslatedShader TranslateShader(ShaderStage stage, const uint32_t* ucode, uint32_t dwordCount);
+
+    // crashott-pc's graphics options (gpu/graphics_options.h) on the WGSL of the shaders they apply
+    // to (graphics_options_wgsl.cpp). Returns the option's name, or nullptr when there is none.
+    const char* PatchShader(ShaderStage stage, uint64_t hash, std::string& wgsl);
 }

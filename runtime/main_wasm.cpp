@@ -14,8 +14,11 @@
 #include "kernel/memory.h"
 #include "kernel/xex_loader.h"
 #include "paths.h"
+#include "settings/settings.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
@@ -81,6 +84,26 @@ int main(int argc, char** argv)
     InitFunctionTable();
     vfs::Init(vfs::Config{ g_game, g_mods, g_userData });
     StartWatchdog();
+
+    // The start page's graphics options (crashott-pc's settings.h [graphics]): anti-aliasing and the
+    // three shader options in % (runtime/gpu_web/graphics_options_wgsl.cpp).
+    {
+        settings::Values values = settings::Get();
+        if (const char* aa = getenv("CRASHOTT_AA"))
+            values.antiAliasing = !strcmp(aa, "smaa") ? settings::AntiAliasing::Smaa
+                                  : !strcmp(aa, "fxaa") ? settings::AntiAliasing::Fxaa : settings::AntiAliasing::Off;
+        auto percent = [](const char* name, int& field) {
+            if (const char* text = getenv(name))
+                field = std::clamp(atoi(text), 0, 200);
+        };
+        percent("CRASHOTT_MOTION_BLUR", values.motionBlur);
+        percent("CRASHOTT_DEPTH_OF_FIELD", values.depthOfField);
+        percent("CRASHOTT_SHADOW_SOFTNESS", values.shadowSoftness);
+        settings::Set(values);
+        Log("[main] graphics: anti-aliasing %s, motion blur %d%%, depth of field %d%%, shadow softness %d%%",
+            values.antiAliasing == settings::AntiAliasing::Smaa ? "SMAA" : values.antiAliasing == settings::AntiAliasing::Fxaa ? "FXAA" : "off",
+            values.motionBlur, values.depthOfField, values.shadowSoftness);
+    }
 
     // No page protection in WebAssembly: crashott-pc's texture write watch (gpu/texture_watch.h) would
     // never see the game write a texture again, and textures the CPU updates (the Bink videos' frames,

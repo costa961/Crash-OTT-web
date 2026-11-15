@@ -39,6 +39,7 @@ cpc gpu/tiling_hooks.cpp
 cpc gpu/d3d_native.cpp
 cpc gpu/shader_translator.cpp
 web gpu_web/shader_translator_wgsl.cpp
+web gpu_web/graphics_options_wgsl.cpp
 
 # XEX decryption (crashott-pc's XexImage target)
 cpc xex_image/xex_image.cpp

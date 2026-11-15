@@ -35,6 +35,27 @@
   .switch input[role="switch"]:checked::before { transform: translateX(18px); background: #fff; }
   .switch input[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #status { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 13px; white-space: pre-wrap; max-width: calc(100% - 24px); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #compat { color: #f0b36b; font-size: 14px; max-width: 520px; margin: 0; }
+  /* the "hold to skip" prompt over the game (input.ts) */
+  #skip { position: fixed; right: 18px; bottom: 16px; z-index: 5; display: flex; gap: 10px; align-items: center; pointer-events: none;
+          background: rgba(0, 0, 0, 0.55); color: #eee; padding: 6px 12px 6px 8px; border-radius: 20px; font-size: 14px; }
+  #skip svg { width: 26px; height: 26px; transform: rotate(-90deg); }
+  #skip circle { fill: none; stroke-width: 3.5; }
+  #skip circle.track { stroke: rgba(255, 255, 255, 0.25); }
+  #skip circle.fill { stroke: var(--accent); stroke-dasharray: 100; stroke-dashoffset: 100; }
+  /* dialogs: Controls, Graphics */
+  dialog { background: #16161b; color: var(--fg); border: 1px solid #33333b; border-radius: 12px; padding: 18px 20px; max-width: min(560px, calc(100% - 32px)); }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+  dialog h2 { margin: 0 0 12px; font-size: 18px; }
+  .keytable { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+  .keytable span { color: var(--muted); font-size: 14px; }
+  .keytable button { padding: 4px 12px; min-width: 96px; font-weight: 500; }
+  .keytable button.waiting { border-color: var(--accent); color: var(--accent); }
+  .dlgbar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  .dlgnote { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  .setting { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 14px; }
+  .setting input[type="range"] { grid-column: 1 / -1; accent-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -42,6 +63,7 @@
 <div id="start">
   <h1>Crash of the Titans</h1>
   <p>The Xbox 360 game, recompiled to WebAssembly from your own copy. Unofficial, work in progress.</p>
+  <p id="compat" hidden></p>
   <button id="play">Start</button>
   <label id="langRow">Language <select id="language"></select></label>
   <div id="data">
@@ -51,12 +73,31 @@
   </div>
   <label class="switch">Skip intro videos <input type="checkbox" id="optSkip" role="switch"></label>
   <label class="switch">FPS counter <input type="checkbox" id="optFps" role="switch"></label>
-  <p class="keys">Gamepad, or keyboard: WASD move · Space jump · J attack · K / I · Q / E triggers · Esc start · arrows menus<br>
-    F or double-click: full screen</p>
+  <div class="row">
+    <button id="controlsBtn" class="secondary">Controls</button>
+    <button id="graphicsBtn" class="secondary">Graphics</button>
+  </div>
+  <p class="keys">A gamepad, or the keyboard (see Controls) · F or double-click: full screen</p>
   <button id="logs" title="The log of the last session and this one, to report a problem">Download logs</button>
 </div>
+<dialog id="controlsDlg">
+  <h2>Keyboard controls</h2>
+  <div class="keytable" id="keytable"></div>
+  <p class="dlgnote">Click a key, then press the new one (Esc cancels). Enter is always A too. A gamepad needs no setup.</p>
+  <div class="dlgbar"><button id="keysReset" class="secondary">Reset</button><button id="keysDone">Done</button></div>
+</dialog>
+<dialog id="graphicsDlg">
+  <h2>Graphics</h2>
+  <label class="setting">Anti-aliasing <select id="optAa"><option value="off">Off</option><option value="fxaa">FXAA</option><option value="smaa">SMAA</option></select></label>
+  <label class="setting">Motion blur <output id="mbVal"></output><input type="range" id="optMb" min="0" max="200" step="10"></label>
+  <label class="setting">Depth of field <output id="dofVal"></output><input type="range" id="optDof" min="0" max="200" step="10"></label>
+  <label class="setting">Shadow softness <output id="shVal"></output><input type="range" id="optSh" min="0" max="200" step="10"></label>
+  <p class="dlgnote">100% is the game's own look. Applied when the game starts.</p>
+  <div class="dlgbar"><button id="gfxReset" class="secondary">Reset</button><button id="gfxDone">Done</button></div>
+</dialog>
 <div id="status"></div>
 <div id="fps" hidden></div>
+<div id="skip" hidden><svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15.9" pathLength="100"></circle><circle class="fill" cx="18" cy="18" r="15.9" pathLength="100"></circle></svg><span class="label">Hold to skip</span></div>
 <script type="module" src="main.js"></script>
 </body>
 </html>
