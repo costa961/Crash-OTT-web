@@ -1,0 +1,32 @@
+# Build output and everything generated from the player's game (never commit: copyrighted)
+out/
+generated/
+*.wasm
+*.o
+
+# Game files (copyrighted, bring your own)
+*.iso
+*.xex
+*.rcf
+*.7z
+game/
+private/
+
+# Python / Node
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+web/dist/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.log

@@ -1,0 +1,75 @@
+diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
+--- a/XenonUtils/ppc_context.h
++++ b/XenonUtils/ppc_context.h
+@@ -189,13 +189,20 @@
+ 
+     inline void setFromMask(simde__m128 mask, int imm) noexcept
+     {
++#if defined(__wasm__)
++        // simde__m128 and simde__m128i are both v128_t on WebAssembly, so the two overloads
++        // would be one: the recompiler passes 0xF for float compares, 0xFFFF for byte masks.
++        int m = imm == 0xFFFF ? simde_mm_movemask_epi8(simde_mm_castps_si128(mask)) : simde_mm_movemask_ps(mask);
++#else
+         int m = simde_mm_movemask_ps(mask);
++#endif
+         lt = m == imm; // all equal
+         gt = 0;
+         eq = m == 0; // none equal
+         so = 0;
+     }
+ 
++#if !defined(__wasm__)
+     inline void setFromMask(simde__m128i mask, int imm) noexcept
+     {
+         int m = simde_mm_movemask_epi8(mask);
+@@ -204,6 +211,7 @@
+         eq = m == 0; // none equal
+         so = 0;
+     }
++#endif
+ };
+ 
+ union alignas(0x10) PPCVRegister
+@@ -271,6 +279,26 @@
+         // FPCR is 64 bits wide: a 32-bit operand would leave the register's upper half undefined.
+         __asm__ __volatile__("msr fpcr, %0" : : "r"(uint64_t(csr)));
+     }
++#elif defined(__wasm__)
++    // WebAssembly has no floating-point control register: rounding is always to nearest and
++    // denormals are kept. The guest's mode is remembered per thread so mffs reads back what
++    // mtfsf wrote, but it does not change how the host rounds.
++    static constexpr size_t RoundShift = 0;
++    static constexpr size_t RoundMask = 3;
++    static constexpr size_t FlushMask = 4;
++    static constexpr size_t GuestToHost[] = { PPC_ROUND_NEAREST, PPC_ROUND_TOWARD_ZERO, PPC_ROUND_UP, PPC_ROUND_DOWN };
++    static constexpr size_t HostToGuest[] = { PPC_ROUND_NEAREST, PPC_ROUND_TOWARD_ZERO, PPC_ROUND_UP, PPC_ROUND_DOWN };
++    static inline thread_local uint32_t wasmCsr = 0;
++
++    inline uint32_t getcsr() noexcept
++    {
++        return wasmCsr;
++    }
++
++    inline void setcsr(uint32_t csr) noexcept
++    {
++        wasmCsr = csr;
++    }
+ #else
+ #   error "Missing implementation for FPSCR."
+ #endif
+@@ -714,6 +742,15 @@
+                  : "=r"(ret)::"memory");
+     return ret;
+ }
++#elif defined(__wasm__)
++// No cycle counter in WebAssembly: a monotonic clock in nanoseconds instead.
++#include <time.h>
++inline uint64_t __rdtsc()
++{
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
++}
+ #elif !defined(__x86_64__) && !defined(_M_X64)
+ #   error "Missing implementation for __rdtsc()"
+ #endif
