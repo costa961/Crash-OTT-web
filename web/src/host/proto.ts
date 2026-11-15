@@ -29,5 +29,6 @@ export type ToPage =
   | { t: 'ready'; slot: number }
   | { t: 'log'; line: string; tid: number }
   | { t: 'gpu'; ctl: number }
+  | { t: 'input'; block: number }
   | { t: 'trap'; tid: number; message: string; stack: string }
   | { t: 'exit'; code: number };

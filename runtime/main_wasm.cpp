@@ -82,6 +82,11 @@ int main(int argc, char** argv)
     vfs::Init(vfs::Config{ g_game, g_mods, g_userData });
     StartWatchdog();
 
+    // No page protection in WebAssembly: crashott-pc's texture write watch (gpu/texture_watch.h) would
+    // never see the game write a texture again, and textures the CPU updates (the Bink videos' frames,
+    // dynamic UI textures) would stay at their first version. The renderer hashes them instead.
+    setenv("CRASH_TEXTURE_WATCH", "0", 0);
+
     uint32_t stackSize = module.defaultStackSize ? module.defaultStackSize : 0x40000;
     InitGuestProcess(stackSize);
     gpu::Init();

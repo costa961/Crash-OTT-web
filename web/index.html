@@ -14,6 +14,11 @@
   #start h1 { margin: 0; font-size: 28px; }
   #start p { margin: 0; color: var(--muted); max-width: 520px; }
   button { font: inherit; padding: 10px 28px; border-radius: 8px; border: 0; background: var(--accent); color: #111; font-weight: 600; cursor: pointer; }
+  #data { display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 8px; width: min(420px, 100%); }
+  #data progress { width: 100%; height: 8px; accent-color: var(--accent); }
+  #dataText { color: var(--muted); font-size: 14px; margin: 0; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid #3a3a42; font-weight: 500; padding: 8px 20px; }
+  .keys { font-size: 13px; }
   #status { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 13px; white-space: pre-wrap; max-width: calc(100% - 24px); }
 </style>
 </head>
@@ -23,6 +28,12 @@
   <h1>Crash of the Titans</h1>
   <p>The Xbox 360 game, recompiled to WebAssembly from your own copy. Unofficial, work in progress.</p>
   <button id="play">Start</button>
+  <div id="data">
+    <p id="dataText">Game data: checking...</p>
+    <progress id="dataBar" max="1" value="0" hidden></progress>
+    <button id="download" class="secondary" hidden>Download game data</button>
+  </div>
+  <p class="keys">Gamepad, or keyboard: WASD move · Space jump · J attack · K / I · Q / E triggers · Esc start · arrows menus</p>
 </div>
 <div id="status"></div>
 <script type="module" src="main.js"></script>

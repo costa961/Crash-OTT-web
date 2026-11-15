@@ -13,6 +13,8 @@
 //   GET  (Range: bytes=a-b)            the bytes
 //   PUT  ?op=write&pos=N  (body)       writes at N (creates the file)
 //   POST ?op=truncate&size=N | op=mkdir | op=unlink | op=rmdir | op=rename&to=<root>/<path>
+// /fs-manifest: every file of the game folder {files: [{p, s, m}]} (path, size, mtime), for the page's
+// download into the browser's storage (web/src/host/download-worker.ts).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -82,6 +84,12 @@ async function fileApi(req, res, url) {
     if (req.method === 'GET') {
       const st = fs.statSync(p);
       const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '');
+      if (!m) {
+        // a whole file (the page's download): streamed, never held in memory
+        res.writeHead(200, { ...isolation, 'Content-Type': 'application/octet-stream', 'Content-Length': st.size });
+        fs.createReadStream(p).pipe(res);
+        return;
+      }
       const start = m ? Number(m[1]) : 0, end = m && m[2] ? Math.min(Number(m[2]), st.size - 1) : st.size - 1;
       if (start >= st.size) return send(res, 206, Buffer.alloc(0), { 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes */${st.size}` });
       const len = end - start + 1, buf = Buffer.alloc(len), fd = fs.openSync(p, 'r');
@@ -116,8 +124,18 @@ async function fileApi(req, res, url) {
   }
 }
 
+function manifest(dir, prefix = '', out = []) {
+  for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, d.name), rel = prefix + d.name;
+    if (d.isDirectory()) manifest(full, rel + '/', out);
+    else if (d.isFile()) { const st = fs.statSync(full); out.push({ p: rel, s: st.size, m: Math.round(st.mtimeMs) }); }
+  }
+  return out;
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/fs-manifest') return json(res, { files: manifest(roots.game.dir) });
   if (url.pathname.startsWith('/fs/')) return fileApi(req, res, url);
   let file;
   if (url.pathname === '/crashott.wasm') file = path.join(ROOT, 'out', 'web', 'crashott.wasm');

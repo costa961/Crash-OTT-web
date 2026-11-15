@@ -115,6 +115,11 @@ namespace
 
     thread_local WasmFiber* t_currentFiber;
 
+    // Fiber switch costs (logged every 5 s while switches happen): a switch hands the baton to
+    // another thread, which in a browser takes far longer than a host fiber switch.
+    std::atomic<uint64_t> g_switches, g_switchNs;
+    std::atomic<int64_t> g_lastSwitchLog;
+
     void* FiberThreadMain(void* p)
     {
         auto* fiber = static_cast<WasmFiber*>(p);
@@ -267,8 +272,19 @@ namespace plat
         void* tls = GetTlsBase();
         to->resumerTls = tls;
         t_currentFiber = to; // in the shared block: what the target sees as its current fiber
+        uint64_t t0 = PerfCounter();
         to->baton.Open();
         from->baton.WaitAndClose();
+        // (the time until this fiber runs again: the other fiber's work included)
+        g_switches.fetch_add(1, std::memory_order_relaxed);
+        g_switchNs.fetch_add(PerfCounter() - t0, std::memory_order_relaxed);
+        int64_t now = int64_t(PerfCounter() / 1000000000ull), last = g_lastSwitchLog.load();
+        if (now - last >= 5 && g_lastSwitchLog.compare_exchange_strong(last, now))
+        {
+            uint64_t n = g_switches.exchange(0), ns = g_switchNs.exchange(0);
+            Log("[fiber] %llu switches in the last %lld s, %.1f us from switching away to running again on average",
+                (unsigned long long)n, (long long)(now - last), n ? double(ns) / double(n) / 1000.0 : 0.0);
+        }
         // Back: whoever handed the baton back shares this chain's thread-local block.
         SetTlsBase(from->resumerTls);
         t_currentFiber = from;

@@ -31,7 +31,20 @@ function request(method: string, p: string, query = '', body?: Uint8Array, heade
 const blocks = new Map<string, Uint8Array>();  // "<path>#<block>" -> bytes, insertion order = age
 const sizes = new Map<string, number>();
 
+// The game files downloaded into the browser's storage (gamecache.ts), opened by the worker before
+// the game starts: OPFS name -> handle. Read locally, without the server.
+interface Local { h: FileSystemSyncAccessHandle; size: number; mtime: number; ino: number }
+const local = new Map<string, Local>();
+let scratch = new Uint8Array(1 << 20);
+
+export function useLocal(name: string, h: FileSystemSyncAccessHandle, size: number, mtime: number) {
+  local.set(name, { h, size, mtime, ino: local.size + 1000 });
+}
+const localOf = (p: string) => p.startsWith('game/') ? local.get(p.slice(5).toLowerCase().replace(/\//g, '__')) : undefined;
+
 export function stat(p: string): Stat {
+  const l = localOf(p);
+  if (l) return { type: 'file', size: l.size, mtimeMs: l.mtime, ino: l.ino };
   return JSON.parse(request('GET', p, '?op=stat').responseText) as Stat;
 }
 
@@ -46,6 +59,15 @@ function readRange(p: string, pos: number, len: number): Uint8Array {
 
 /** Reads up to dst.length bytes at pos; returns the count (short at the end of the file). */
 export function read(p: string, pos: number, dst: Uint8Array): number {
+  const l = localOf(p);
+  if (l) {
+    // a sync access handle doesn't read into shared memory: through a buffer of its own
+    if (scratch.length < dst.length) scratch = new Uint8Array(dst.length);
+    const view = scratch.subarray(0, dst.length);
+    const n = l.h.read(view, { at: pos });
+    dst.set(view.subarray(0, n));
+    return n;
+  }
   if (!p.startsWith('game/')) {
     const got = readRange(p, pos, dst.length);
     dst.set(got);

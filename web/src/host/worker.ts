@@ -3,6 +3,7 @@
 // (which came from GTA San Andreas web's runner), with the files over the local server (fs.ts).
 // The descriptor table lives in a SharedArrayBuffer so every thread sees the same files.
 import * as fs from './fs';
+import { cacheDir, readComplete } from './gamecache';
 import { C_POOL, C_TID, FD_MAX, FD_PATH, FD_SZ, K_BUSY, K_DIR, K_FILE, K_FREE, POOL, PREOPENS, S_CLAIM, S_IDLE, S_MAIN, S_RUN,
   type WorkerInit, type ToPage } from './proto';
 
@@ -258,6 +259,8 @@ self.onmessage = async (ev: MessageEvent<WorkerInit>) => {
     register: () => 0,
     // the page attaches the executor (gpu/executor.ts); 1: the recorder waits for it
     gpu_register: (ctlPtr: number) => { post({ t: 'gpu', ctl: ctlPtr }); return 1; },
+    // the controllers' block (runtime/input_wasm.cpp): the page writes it (input.ts)
+    input_register: (block: number) => post({ t: 'input', block }),
   };
   const imports: Record<string, Record<string, unknown>> = {
     env: { memory }, wasi_snapshot_preview1: wasi, wasi: { 'thread-spawn': threadSpawn }, crashott: host,
@@ -266,6 +269,18 @@ self.onmessage = async (ev: MessageEvent<WorkerInit>) => {
     const ns = (imports[im.module] ??= {});
     if (im.kind === 'function' && !(im.name in ns))
       ns[im.name] = (...a: unknown[]) => { post({ t: 'log', line: `[host] unimplemented import ${im.module}.${im.name}(${a.join(',')})`, tid }); return E.NOSYS; };
+  }
+  // The game files already in the browser's storage: read-only handles (several workers may hold one).
+  try {
+    const dir = await cacheDir();
+    for (const [name, f] of Object.entries(await readComplete(dir))) {
+      const fh = await dir.getFileHandle(name);
+      const h = await (fh as unknown as { createSyncAccessHandle(o: { mode: string }): Promise<FileSystemSyncAccessHandle> })
+        .createSyncAccessHandle({ mode: 'read-only' });
+      fs.useLocal(name, h, f.s, f.m);
+    }
+  } catch (e) {
+    if (slot === 0) post({ t: 'log', line: `[host] game files in the browser's storage not usable: ${String(e)}`, tid });
   }
   const ex = (await WebAssembly.instantiate(mod, imports as WebAssembly.Imports)).exports as unknown as {
     _start(): void; wasi_thread_start(tid: number, arg: number): void;
