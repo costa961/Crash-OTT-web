@@ -48,17 +48,27 @@ The Xbox 360 guest uses 32-bit addresses (crashott-pc `docs/internals/recompiler
 | `0xA0000000-0xBFFFFFFF` | physical memory, 64 KB pages |
 | `0xC0000000-0xDFFFFFFF` | physical memory, 16 MB pages (an alias of the same 512 MB on the console) |
 
-Plan: wasm32 linear memory of 4 GB with **guest address == linear address**, as GTA SA web does
-(`g_mem == 0`, every guest load/store is one wasm load/store with no extra arithmetic). The guest never
-touches `[0, 0x40000000)`, so the runtime's data, heap and stacks live there (`--global-base` low, a cap on
-the runtime heap below `0x40000000`). Untouched pages cost no RAM.
+wasm32 linear memory up to 4 GB with **guest address == linear address**, as GTA SA web does (`base` is
+address 0). The guest never touches `[0, 0x40000000)`, so the runtime's data, heap and stacks live there.
+Linear memory grows as the guest heaps are committed (`runtime/memory_wasm.cpp`); the boot reaches 3 GB
+(`0xC0000000`, the top of the physical heap). On Windows the browser commits what it grows (commit charge,
+not RAM: untouched pages stay zero pages).
 
 Differences from the PC build, which reserves the 4 GB with `VirtualAlloc` and aliases views:
-- **No aliasing.** The `0xA` and `0xC` views get disjoint physical ranges from the allocator, so each
-  physical page has exactly one CPU view; the GPU maps a physical address back to its view.
-- **No MMIO traps.** The PC build write-traps the GPU register page. Here the command processor thread
-  polls the ring-buffer write pointer (Atomics.wait on a hook, or a tight poll), and XMA kicks are caught by
-  hooking the guest functions that write them.
+- **Folded physical views.** The title's D3D reads physical memory through the `0xC0000000` view as well
+  as `0xA0000000` (e.g. `memcpy` from `0xCAE21000` of what was allocated at `0xAAE21000`), and linear memory
+  can't map a page twice. `patches/XenonRecomp-wasm.patch` makes `base` an empty `PPCBase` on wasm whose
+  `operator+` folds `0xC0000000-0xDFFFFFFF` onto `0xA0000000` (`PPCGuestToHost`): it covers the
+  `PPC_LOAD/STORE` macros and the ~1,500 direct `base + ea` the recompiler emits (vector loads/stores,
+  reservations, setjmp), costs a shift, a compare and a select per access, and nothing in the calling
+  convention (the wasm C++ ABI passes no empty struct). The `0xE0000000` view stays unmapped, as on PC.
+- **No MMIO traps.** The PC build write-traps the GPU register page. Here the guest's stores land in the
+  register window like any other (`patches/crashott-pc-web.patch`: `gpu::ReadRegister/WriteRegister` use
+  the window memory for the first page too), and the command processor polls `CP_RB_WPTR` every 2 ms, as
+  it already did on PC as a fallback. XMA kicks: to do (hook the guest functions that write them).
+
+crashott-pc's runtime is compiled from a copy (`out/web/cpc-src`) with `patches/crashott-pc-web.patch`
+applied; the submodule stays untouched.
 
 The runtime's heap stays below `0x40000000` through `runtime/sbrk.c`: wasi-libc's own sbrk grows memory
 at its end, which here belongs to the guest.
@@ -87,12 +97,12 @@ at its end, which here belongs to the guest.
    kernel, file system, XEX loader and XenonUtils unchanged, plus `runtime/`: `platform_wasm.cpp`,
    `memory_wasm.cpp`, `sbrk.c`, `diagnostics_wasm.cpp`, `main_wasm.cpp`, `stubs.cpp`) into a 23 MB
    `out/web/crashott.wasm`. Built with `-fno-exceptions` (wasi-sdk's libc++ has none; the runtime throws none).
-3. **Boot to the first frame headless** — in progress. `tools/run-node.mjs` (from GTA SA web's runner) boots
-   the module under Node (`--experimental-wasm-exnref`; Chrome has exnref on by default): the XEX is
-   decrypted, the call table filled, the title creates 12 guest threads, switches its loading fibers, reads
-   XAM notifications and sign-in state and reaches its first `VdSwap`, where it waits for the GPU (still a
-   stub). Linear memory: 3 GB. Next: crashott-pc's `gpu/video_imports.cpp`, `gpu.cpp` and
-   `command_processor.cpp` with the ring-buffer write pointer polled instead of trapped, PM4 swaps counted.
+3. **Boot to the first frame headless** — done. `tools/run-node.mjs` (from GTA SA web's runner) boots the
+   module under Node (`--experimental-wasm-exnref`; Chrome has exnref on by default) with crashott-pc's GPU
+   front end (`gpu.cpp`, `command_processor.cpp`, `video_imports.cpp`, the D3D hooks) and a null renderer
+   (`runtime/stubs.cpp`): in 120 s the title runs 3,660 frames at its 30 fps (2 vblanks per swap), every
+   swap packet executed by the command processor, ~10,000 interrupts delivered, and opens the Bink shaders
+   for its intro movies.
 4. **WebGPU renderer**: `rhi::Device` on WebGPU, Xenos → WGSL; menus on screen.
 5. **Audio, input, saves** (OPFS / IndexedDB).
 6. **Performance and polish**, deploy (Caddy + Docker, as GTA SA web).

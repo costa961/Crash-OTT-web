@@ -7,12 +7,21 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 GEN="$ROOT/out/recomp/generated/ppc"
-CPC="$ROOT/third_party/crashott-pc/runtime"
 XU="$ROOT/out/XenonRecomp"
 OUT="$ROOT/out/web"
 WASI="${WASI:-/opt/wasi-sdk}"; SIMDE="${SIMDE:-/opt/simde}"
 J="${J:-$(nproc)}"; OPT="${OPT:--O2}"
 mkdir -p "$OUT/rt"
+
+# crashott-pc's runtime, copied with patches/crashott-pc-web.patch applied (the few CRASH_WEB
+# changes it needs; the submodule itself stays untouched).
+CPC="$OUT/cpc-src/runtime"
+rm -rf "$OUT/cpc-src"; mkdir -p "$OUT/cpc-src"
+cp -r "$ROOT/third_party/crashott-pc/runtime" "$OUT/cpc-src/"
+# A repository of its own: inside this one, git apply would skip (silently) every path outside the
+# current directory.
+(cd "$OUT/cpc-src" && git init -q && git apply --ignore-whitespace "$ROOT/patches/crashott-pc-web.patch") ||
+  { echo "patches/crashott-pc-web.patch does not apply to third_party/crashott-pc"; exit 1; }
 
 # Guest layout (docs/ARCHITECTURE.md "Memory model"): guest address == linear memory address. The
 # runtime's data, stack and heap stay below RUNTIME_END (runtime/sbrk.c), where the guest never goes.
@@ -37,7 +46,7 @@ compile() { # kind path
   [ "$rel" = "xex_image/xex_image.cpp" ] && flags="$INC_XU -I$CPC"
   case "$src" in *.c) cc="$WASI/bin/clang -std=c17" ;; *) cc="$WASI/bin/clang++ -std=c++20 -fno-exceptions" ;; esac
   obj="$OUT/rt/${kind}_$(echo "$rel" | tr '/' '_').o"
-  local sum; sum="$( (cat "$src" "$ROOT"/runtime/compat/*.h 2>/dev/null; echo "$cc $COMMON $flags") | sha1sum | cut -c1-40)"
+  local sum; sum="$( (cat "$src" "$ROOT"/runtime/compat/*.h "$GEN"/ppc_config.h "$GEN"/ppc_context.h 2>/dev/null; echo "$cc $COMMON $flags") | sha1sum | cut -c1-40)"
   if [ -z "${NOLINK:-}" ] && [ -f "$obj" ] && [ "$(cat "$obj.sum" 2>/dev/null)" = "$sum" ]; then return 0; fi
   if out=$($cc $COMMON $flags -Wno-unused-label -c -o "$obj" "$src" 2>&1); then
     echo "$sum" > "$obj.sum"

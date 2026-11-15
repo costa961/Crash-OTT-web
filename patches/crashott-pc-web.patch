@@ -1,0 +1,39 @@
+diff --git a/runtime/gpu/gpu.cpp b/runtime/gpu/gpu.cpp
+--- a/runtime/gpu/gpu.cpp
++++ b/runtime/gpu/gpu.cpp
+@@ -294,6 +294,11 @@
+ 
+     uint32_t ReadRegister(uint32_t index)
+     {
++#if defined(CRASH_WEB)
++        // WebAssembly: no write trap, so the guest's stores to the first page land in the window
++        // memory like the rest; the command processor polls CP_RB_WPTR there.
++        return index < REGISTER_COUNT ? LoadBE32(GPU_MMIO_BEGIN + index * 4) : 0;
++#endif
+         if (index < TRAPPED_PAGE_REGISTERS)
+             return g_trappedRegisters[index];
+         return index < REGISTER_COUNT ? LoadBE32(GPU_MMIO_BEGIN + index * 4) : 0;
+@@ -301,6 +306,11 @@
+ 
+     void WriteRegister(uint32_t index, uint32_t value)
+     {
++#if defined(CRASH_WEB)
++        if (index < REGISTER_COUNT)
++            StoreBE32(GPU_MMIO_BEGIN + index * 4, value);
++        else
++#endif
+         if (index < TRAPPED_PAGE_REGISTERS)
+             g_trappedRegisters[index] = value;
+         else if (index < REGISTER_COUNT)
+diff --git a/runtime/gpu/d3d_native.cpp b/runtime/gpu/d3d_native.cpp
+--- a/runtime/gpu/d3d_native.cpp
++++ b/runtime/gpu/d3d_native.cpp
+@@ -151,7 +151,7 @@
+     // writes again from the same cursor, and the two are compared (only when the run stayed in one
+     // segment, so both wrote the same memory).
+     template <typename Native>
+-    void VerifiedFlush(PPCContext& ctx, uint8_t* base, void (*original)(PPCContext&, uint8_t*), Native native, const char* name)
++    void VerifiedFlush(PPCContext& ctx, uint8_t* base, PPCFunc* original, Native native, const char* name)
+     {
+         static std::atomic<uint64_t> s_checked, s_mismatches;
+         PPCContext saved = ctx;

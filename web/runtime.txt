@@ -26,6 +26,16 @@ cpc fs/xenon_drive_hooks.cpp
 cpc diagnostics.cpp
 cpc symbols.cpp
 cpc platform/file_posix.cpp
+cpc settings/settings.cpp
+cpc settings/controls.cpp
+
+# GPU: registers, command processor, interrupts, the title's D3D hooks (gpu.cpp patched: no MMIO trap)
+cpc gpu/gpu.cpp
+cpc gpu/command_processor.cpp
+cpc gpu/video_imports.cpp
+cpc gpu/ring_buffer_hook.cpp
+cpc gpu/tiling_hooks.cpp
+cpc gpu/d3d_native.cpp
 
 # XEX decryption (crashott-pc's XexImage target)
 cpc xex_image/xex_image.cpp
