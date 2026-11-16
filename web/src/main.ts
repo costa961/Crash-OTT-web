@@ -6,6 +6,7 @@
 import { C_INTS, C_POOL, C_TID, FD_MAX, FD_SZ, INITIAL_PAGES, MAX_PAGES, POOL, S_IDLE, S_MAIN, type BootConfig, type ToPage } from './host/proto';
 import { IO_REPLY_BYTES } from './host/io-proto';
 import { Executor } from './gpu/executor';
+import { FUR_COLORS } from './gpu/recolor';
 import { ACTIONS, attachInput, DEFAULT_BINDINGS, DEFAULT_PAD, keyboardPlayer, keyName, loadBindings, loadPadBindings, PAD_ACTIONS, padButtonName,
   RESERVED_KEYS, saveBindings, savePadBindings, setKeyboardPlayer, type Action, type GameInput, type PadAction } from './input';
 import { exportSaves, importSaves } from './saves';
@@ -80,6 +81,34 @@ languageSel.onchange = () => {
   void showData();
 };
 
+// Crash's colour: remembered in this browser; the executor recolours his textures (gpu/recolor.ts)
+// from the start (the videos keep theirs). Picked before Start: the textures are recoloured as they load.
+const furSwatches = document.getElementById('furSwatches') as HTMLDivElement;
+const furName = document.getElementById('furName') as HTMLElement;
+let furColor = 'original';
+try { furColor = localStorage.getItem('crashott-fur') ?? 'original'; } catch { /* no storage */ }
+if (!FUR_COLORS.some(c => c.id === furColor)) furColor = 'original';
+for (const c of FUR_COLORS) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.setAttribute('role', 'radio');
+  b.title = c.name;
+  b.setAttribute('aria-label', c.name);
+  b.style.setProperty('--c', c.id === 'original' ? '#f28c28' : `rgb(${c.rgb.join(',')})`);
+  b.onclick = () => {
+    furColor = c.id;
+    try { localStorage.setItem('crashott-fur', furColor); } catch { /* no storage */ }
+    showFur();
+  };
+  b.dataset.id = c.id;
+  furSwatches.append(b);
+}
+function showFur() {
+  furSwatches.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === furColor)));
+  furName.textContent = FUR_COLORS.find(c => c.id === furColor)!.name;
+}
+showFur();
+
 async function gpu(): Promise<GPUDevice> {
   if (!navigator.gpu) throw new Error('This browser has no WebGPU (use a recent Chrome or Edge).');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -119,6 +148,9 @@ async function start(audio: AudioContext, mp?: MpChoice) {
   env.CRASHOTT_LANGUAGE ??= languageSel.value;
   if (mp) {
     env.CRASHOTT_MP = mp.role;
+    // Crash's colour: the session's own (each player's Crash, the same on every machine; the host gives
+    // a colour already taken the next free one), not the executor's recolouring
+    env.CRASH_MP_COLOR ??= FUR_COLORS.find(c => c.id === furColor)?.mp ?? 'orange';
     env.CRASHOTT_MP_NAME = mp.name;
     if (mp.join) env.CRASHOTT_MP_JOIN = mp.join;
     // a client waits for the host's level at the main menu: straight there
@@ -154,7 +186,7 @@ async function start(audio: AudioContext, mp?: MpChoice) {
           case 'log': log(m.line); break;
           case 'gpu':
             try {
-              executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log });
+              executor = new Executor({ device, context, canvas, memory, ctlPtr: m.ctl, log, furColor: mp ? 'original' : furColor });
               startFps(() => executor?.framesPresented ?? 0);
               followCanvasSize(executor);
             }

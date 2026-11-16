@@ -10,6 +10,7 @@
 // - The built-in passes' HLSL is replaced by passes.ts's WGSL of the same name.
 import { formatOf, renderTargetFormatOf, type FormatInfo } from './formats';
 import { CLEAR_COLOR_PS, DEPTH_COPY_PS, DRAW_PS, FULLSCREEN_VS, PASS_PS } from './passes';
+import { Recolor } from './recolor';
 
 // webgpu_proto.h
 const WG_MAGIC = 0x43475757, WG_VERSION = 1;
@@ -68,6 +69,8 @@ export interface ExecutorOptions {
   memory: WebAssembly.Memory;
   ctlPtr: number;
   log: (s: string) => void;
+  /** Crash's fur colour (recolor.ts FUR_COLORS id) */
+  furColor?: string;
 }
 
 export class Executor {
@@ -75,6 +78,9 @@ export class Executor {
   private ctx: GPUCanvasContext;
   private mem: WebAssembly.Memory;
   private ctlPtr: number;
+  private recolor: Recolor | null;
+  /** Crash's palettes recoloured (recolor.ts), by their content's key */
+  private crashPalettes = new Map<number, { texture: GPUTexture; view: GPUTextureView }>();
   private log: (s: string) => void;
   private features: Set<string>;
   private ring!: GPUBuffer;
@@ -112,6 +118,7 @@ export class Executor {
 
   constructor(o: ExecutorOptions) {
     this.dev = o.device; this.ctx = o.context; this.mem = o.memory; this.ctlPtr = o.ctlPtr; this.log = o.log;
+    this.recolor = new Recolor(o.furColor ?? 'original', o.log);
     this.features = new Set(o.device.features);
     // The browser's own canvas format (bgra8unorm on most desktops, rgba8unorm on Linux / Android):
     // the other one may not be presentable (headless SwiftShader lost the device with it).
@@ -245,6 +252,7 @@ export class Executor {
         const copy = this.depthCopies.get(u32[w]);
         if (copy) { copy.texture.destroy(); this.depthCopies.delete(u32[w]); }
         this.res.delete(u32[w]);
+        this.recolor?.forget(u32[w]);
         return false;
       }
       case OP.CREATE_BUFFER: this.res.set(u32[w], { address: u32[w + 1], size: u32[w + 2] }); return false;
@@ -388,6 +396,10 @@ export class Executor {
     this.endPass();
     const b = t.info.block;
     const w = Math.ceil(width / b) * b, h = Math.ceil(height / b) * b;
+    // Crash's fur colour (recolor.ts): in place in the shared upload ring, copied to the GPU at the submit
+    if (this.recolor?.active)
+      this.recolor.upload(id, level, new Uint8Array(this.mem.buffer as unknown as ArrayBuffer, this.ctl().u32[CTL.uploadRing] + offset, rowPitch * (h / b)),
+        rowPitch, width, height, t.dxgi);
     this.encoder().copyBufferToTexture({ buffer: this.ring, offset, bytesPerRow: rowPitch, rowsPerImage: h / b },
       { texture: t.texture, mipLevel: level }, [w, h]);
   }
@@ -719,6 +731,9 @@ export class Executor {
     pass.setStencilReference(u32[w + 21] & 0xFF);
     pass.setBindGroup(0, this.group0, [u32[w + 22], u32[w + 23], u32[w + 24], u32[w + 25]]);
     const entries: GPUBindGroupEntry[] = [];
+    // Crash's 256-colour texture (recolor.ts): its draws read their colours from the 256x1 palette
+    // beside it, which is bound recoloured instead
+    const crashIndices = !!this.recolor?.hasIndexTextures && pipe.textures.some(n => n < textureCount && this.recolor!.isIndexTexture(u32[bw + 6 * n]));
     for (const n of pipe.textures) {
       const b = bw + 6 * n;
       const t = n < textureCount ? this.tex(u32[b]) : null;
@@ -728,7 +743,8 @@ export class Executor {
       const unfilterable = !!t && /32float/.test(t.info.format) && !this.features.has('float32-filterable');
       let resource: GPUTextureView;
       if (t?.info.depth && kind !== 2 && this.depthCopies.has(u32[b])) resource = this.depthCopies.get(u32[b])!.view;
-      else if (t && !t.info.depth && kind === 0 && !unfilterable) resource = this.view(t, 0);
+      else if (t && !t.info.depth && kind === 0 && !unfilterable)
+        resource = (crashIndices && t.width === 256 && t.height === 1 ? this.crashPalette(u32[b], t) : null) ?? this.view(t, 0);
       else {
         if (t) this.warn(`view:${t.info.format}:${kind}`, `a draw samples a ${t.info.format} texture (view ${kind}) it can't bind here: the null texture instead`);
         resource = this.view(this.nullTex, 0);
@@ -739,6 +755,20 @@ export class Executor {
     if (pipe.textures.length) pass.setBindGroup(1, this.dev.createBindGroup({ layout: pipe.group1, entries }));
     pass.setIndexBuffer(this.ring, 'uint32');
     pass.drawIndexed(u32[w + 29], 1, u32[w + 28]);
+  }
+
+  /** Palette texture `id` (256x1) recoloured for a draw of Crash's 256-colour texture, or null. */
+  private crashPalette(id: number, t: Tex): GPUTextureView | null {
+    const p = this.recolor!.recolorPalette(id);
+    if (!p) return null;
+    let c = this.crashPalettes.get(p.key);
+    if (!c) {
+      const texture = this.dev.createTexture({ size: [256, 1], format: t.info.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label: 'crash palette' });
+      this.dev.queue.writeTexture({ texture }, p.data as Uint8Array<ArrayBuffer>, { bytesPerRow: 1024 }, [256, 1]);
+      c = { texture, view: texture.createView() };
+      this.crashPalettes.set(p.key, c);
+    }
+    return c.view;
   }
 
   /** Depth texture `id` -> its r32float copy (depthCopies), unless the copy is up to date. */
@@ -818,7 +848,10 @@ export class Executor {
       if (len) this.dev.queue.writeBuffer(this.ring, off, new Uint8Array(buf, uploadRing + off, (len + 3) & ~3));
     }
     if (this.enc) { this.dev.queue.submit([this.enc.finish()]); this.enc = null; }
+    // the recoloured palettes no batch uses any more: dropped now and then (made again when needed)
+    if (this.crashPalettes.size > 256) { for (const p of this.crashPalettes.values()) p.texture.destroy(); this.crashPalettes.clear(); }
     Atomics.store(ctl.i32, CTL.fence, fence | 0);
     Atomics.notify(ctl.i32, CTL.fence);
   }
 }
+

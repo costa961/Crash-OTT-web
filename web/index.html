@@ -71,6 +71,13 @@
   dialog h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); font-weight: 600; }
   .setting-switch { justify-content: space-between; margin: 6px 0; }
   .setting input[type="range"] { grid-column: 1 / -1; accent-color: var(--accent); }
+  /* Crash's colour (gpu/recolor.ts) */
+  #furRow { color: var(--muted); font-size: 14px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  #furRow b { color: var(--fg); font-weight: 500; }
+  #furSwatches { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #furSwatches button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid #3a3a42; background: var(--c); }
+  #furSwatches button[aria-checked="true"] { border-color: var(--fg); box-shadow: 0 0 0 2px var(--accent); }
+  #furSwatches button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -84,6 +91,7 @@
     <button id="coopBtn" class="secondary" title="Play the story together with other players on this server">Online co-op</button>
   </div>
   <label id="langRow">Language <select id="language"></select></label>
+  <div id="furRow"><span>Crash's colour: <b id="furName"></b></span><div id="furSwatches" role="radiogroup" aria-label="Crash's colour"></div></div>
   <div id="data">
     <p id="dataText">Game data: checking...</p>
     <progress id="dataBar" max="1" value="0" hidden></progress>

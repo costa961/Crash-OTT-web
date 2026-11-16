@@ -74,6 +74,10 @@ docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src -p 12
 
 On the start page:
 - **Language**: the six languages of the disc (the game's own voices and texts).
+- **Crash's colour**: his fur in another colour (blue, green, purple, crimson, pink, gold, teal, white, black),
+  in game and in the in-engine cutscenes; the videos keep the original. Picked before Start. In online co-op
+  it is your Crash's colour for everyone in the session (two players asking for the same one: the host gives
+  the second one the next free colour).
 - **Download game data** (once, about 1.9 GB): the game files the game reads, into the browser's storage, for
   fast loads. Without it the game reads them from the local server.
 - **Skip intro videos**: no logo videos, no legal-text wait, no title screen: straight to the main menu.
