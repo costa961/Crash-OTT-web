@@ -87,8 +87,8 @@
   <p>The Xbox 360 game, recompiled to WebAssembly from your own copy. Unofficial, work in progress.</p>
   <p id="compat" hidden></p>
   <div class="row">
-    <button id="play">Start</button>
-    <button id="coopBtn" class="secondary" title="Play the story together with other players on this server">Online co-op</button>
+    <button id="play">Play solo</button>
+    <button id="coopBtn" class="secondary" title="Play the story together with other players on this server">Play online co-op</button>
   </div>
   <label id="langRow">Language <select id="language"></select></label>
   <div id="furRow"><span>Crash's colour: <b id="furName"></b></span><div id="furSwatches" role="radiogroup" aria-label="Crash's colour"></div></div>
@@ -140,13 +140,22 @@
   <div class="dlgbar" style="justify-content:flex-start;margin-top:4px"><button id="mpHost">Host a session</button></div>
   <h3>Sessions on this server</h3>
   <div id="mpList" class="mplist"><p class="dlgnote">Looking...</p></div>
-  <p class="dlgnote">Join while the host is in the menus or at the HUB (not in a level). Only the host keeps a save.</p>
+  <p class="dlgnote">Joining while the host is in a level (back after a drop, too): you wait at the main menu and come in
+    at the host's next level. Only the host keeps a save.</p>
   <div class="dlgbar"><button id="coopDone" class="secondary">Close</button></div>
 </dialog>
 <dialog id="mpLevelDlg">
   <h2>Online co-op</h2>
   <p class="dlgnote" style="margin-top:0">The game goes on for the others meanwhile.</p>
-  <div class="dlgbar"><button id="mpLeave" class="secondary">Leave the session</button><button id="mpResume">Resume</button></div>
+  <div class="dlgbar"><button id="mpLeave" class="secondary">Leave the session</button><button id="mpResume" autofocus>Resume</button></div>
+</dialog>
+<dialog id="reportDlg">
+  <h2>Report a problem</h2>
+  <p class="dlgnote" style="margin-top:0">Marks this moment in the log and saves the log to a file, to send with your report.
+    The game goes on meanwhile.</p>
+  <label class="setting" style="display:block">What happened? (optional)
+    <textarea id="reportNote" rows="3" maxlength="300" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:6px;font:inherit"></textarea></label>
+  <div class="dlgbar"><button id="reportCancel" class="secondary">Cancel</button><button id="reportSave">Save the log</button></div>
 </dialog>
 <dialog id="graphicsDlg">
   <h2>Graphics</h2>

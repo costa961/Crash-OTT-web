@@ -179,10 +179,60 @@ session protocol "CML1") is built as it is, with three things of the browser's o
   the mailbox.
 - **Input**: `runtime/input_wasm.cpp` sends player 1's pad (`mp::LocalPad`) and gives controllers 2-4 the remote
   players' pads (`mp::RemotePad`). A client waiting at the main menu has its buttons off (`input.ts` setBlocked):
-  the host's level start is taken from the main menu.
+  the host's level start is taken from the main menu. Nothing may look like an unplugged controller, or the game
+  pauses (the host's pause screen, the client's menu): `ReadPad` gives the last consistent pad while the page is
+  writing the block (the page writes it in one go), and in a session `RemotePad` keeps the remote players'
+  controllers plugged in (nothing pressed) out of a level too (the patch).
+- **The client's menu over a level** (`#mpLevelDlg`, the client's START) is the page's: the gamepad drives it
+  (START / B resume, A presses the focused button, the D-pad or the stick moves), Esc and the player's START / B
+  keys resume, and the game sees nothing pressed while it is open.
+- **Joining during a level** (the patch's `mp_lobby.cpp`, lobby protocol 13): crashott-pc refused a player while the
+  host was in a level ("THE GAME HAS STARTED"), so a player who dropped out could not come back before the level
+  ended. Here the host takes it: the player waits at its main menu (its first roster does not follow the level under
+  way) and comes in at the host's next level (the host's player count stays the level's own until then, ApplyHost
+  and HostLevelStarted). A player who left a level keeps a neutral pad there (`RemotePad`, `mp::PlayerDeparted`):
+  one who joins in its slot meanwhile does not walk its hidden Crash.
+- **F8 in game** (`#reportDlg`): a note on what went wrong, written into the log as a `[report]` line at that
+  moment, and the log saved to a file; the game goes on and its keys are off while the dialog is open.
 
-The skins' colour table (`mp_skin_palettes.inc`, made by crashott-pc from extracted game data) is empty here: the
-players' colours go on the fur only. Tested headless with two browsers on one machine (the session, the level
+One rule of this port's own, in the patch (`online/mp_players.cpp`, `mp_net.cpp`): the **team wipe**. In
+crashott-pc online nobody ever loses: a knocked-out player gets up after the session's knock-out time (here next to the
+teammate on foot with the lowest slot; crashott-pc puts it at the last checkpoint, often far behind). Here, when every
+player in play is down at once, the host sends WIPE packets ("CMW1": a number and its lives, repeated for 3 s; lobby
+protocol 12 and later) and every machine sets its lives to the host's and runs the game's own death of a lone player
+(`objectives.lua`'s OnePlayerOutOfPack_P1_Dies as a Lua objective: fade out, `DO_ResetPlayer(1, false)`): the
+`CActionResetPlayer` hook lets that one through to the game (one life less and the checkpoint reloaded, or the
+game-over flag at 0 lives), and once its run (`sub_8220DB10`) says done everybody gets up at the reset position.
+`CRASH_MP_TEST_WIPE=<s>` (host, tests) knocks every player out <s> seconds into a level and after each wipe.
+
+**Titans** (`mp_net.cpp`, JACK packets "CMJ1"): crashott-pc online leaves a jack (Crash riding a titan) on the
+rider's machine, and on the others the titan stood alone, kept being put back by the host's records (the rider's
+own titan jerked), and the others could not take a titan the rider had left. Here:
+- **The titan's name.** StartJacking gives a jacked titan the first free name of a table of 8 (each machine its
+  own pick) and never gives the old one back: the records, hits and jacks that find actors by name lost it. Online a
+  titan keeps the name it had before its first jack (`NameOf`, by actor, until the next level).
+- **The stun.** Each machine's stun meter is its own; a titan stunned on one is stunned on the others (its stamina at
+  0). The fight tree takes a titan to its stunned state (where it can be jacked) only on a hit, so the stunner's copy
+  there hits it once.
+- **Getting on and off as the game does.** A player's jack and its end go to the others; there its copy gets on
+  through its pad (`RemotePad`: it turns to the titan, walks to it, a light attack, B) or off (B), so the ride looks
+  as it does on the rider's machine (Crash's JackStrong, the titan's Jacking state). While the copy rides or stands
+  within 6 units of a titan, the remote pad's own B is off: its machine's jack and its end are what get it on and off
+  (a B on a titan stunned here sooner than there put it on alone; one more B got it off alone). The position
+  corrections leave it be while it gets on or off. If the copy is not on after 8 s, StartJacking alone links them (no
+  ride animation); a copy that still rides what its machine does not say gets off after 8 s.
+- **No death at 0 for a titan nobody rides.** The game stuns such a titan at 0 hitpoints (its stunned state gives
+  it hitpoints again); a 0 that came from the network (the host's records, a client's hit landed on the host) killed
+  it on that machine only, and the other player then rode a titan that no longer existed there.
+- **The ride's place.** The rider's machine sends its titan's position; the others move the titan (its physics), not
+  the Crash, and skip the host's records for a ridden titan.
+Tested with two Chrome windows on one PC: the host or the client stuns a titan and rides it, walks, gets off; the
+other window shows the same ride and the same movement.
+
+The skins' colour table (`mp_skin_palettes.inc`) is made from the player's game by `tools/skin_table.sh`
+(crashott-pc's `tools/assets.py extract` of default.rcf, then `tools/mp_skin_colours.py`) into `out/web/`, and
+`tools/wasm_runtime.sh` compiles it in. Without it the players' colours go on the normal Crash's fur only: a host
+whose save wears a skin (an orange costume) stayed orange for everyone. Tested headless with two browsers on one machine (the session, the level
 start, both Crashes in L1_E1, the host's records with no loss); playing a level through needs two real machines.
 
 ## Known gaps

@@ -66,8 +66,8 @@ export const DEFAULT_BINDINGS: Bindings = {
 };
 
 const STORAGE_KEY = 'crashott-keys';
-/** Keys the game can't have: the page's own (full screen, the in-game options panel). */
-export const RESERVED_KEYS = new Set(['KeyF', 'F11', 'F12', 'F2']);
+/** Keys the game can't have: the page's own (full screen, the in-game options panel, the problem report). */
+export const RESERVED_KEYS = new Set(['KeyF', 'F11', 'F12', 'F2', 'F8']);
 
 export function loadBindings(): Bindings {
   const b: Bindings = { ...DEFAULT_BINDINGS };
@@ -136,7 +136,8 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
   for (const [a] of ACTIONS) keyToActions.set(bindings[a], [...(keyToActions.get(bindings[a]) ?? []), a]);
   const keys = new Set<string>();
   const handled = (code: string) => keyToActions.has(code) || code === 'Enter' || code === 'NumpadEnter';
-  const down = (e: KeyboardEvent) => { if (!paused && handled(e.code)) { keys.add(e.code); e.preventDefault(); } };
+  // (blocked: the keys are the page's, as Esc for online co-op's menu over the level)
+  const down = (e: KeyboardEvent) => { if (!paused && !blocked && handled(e.code)) { keys.add(e.code); e.preventDefault(); } };
   const up = (e: KeyboardEvent) => { keys.delete(e.code); };
   const blur = () => keys.clear();
   // the page hidden (another tab, minimized): the game holds between two frames (runtime/stubs.cpp)
@@ -185,7 +186,10 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
     seen = names;
 
     let skipHeld = false;
-    Atomics.add(i32, 1, 1);   // odd: writing
+    // The pads are made first and written in one go: the game's reads wait while the block is odd (a read that
+    // met it odd for too long took the controller for unplugged, runtime/input_wasm.cpp ReadPad).
+    const out: [number, number, number, number, number, number, number, number][] = [];
+    const rumble: (Gamepad | undefined)[] = [];
     // controller p's gamepad, and whether the keyboard drives it (the header: local co-op)
     const kbSecond = keyboardAsPlayer2 && pads.length > 0;
     for (let p = 0; p < 4; p++) {
@@ -214,19 +218,26 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
       if (keyboard) connected = true;
       // the cutscene skip reads controller 1 (runtime/input_wasm.cpp)
       if (p === 0) skipHeld = (buttons & (B.A | B.BB | B.START)) !== 0;
-      const o = p * PAD_BYTES;
-      dv.setUint32(o, connected ? 1 : 0, true);
+      out.push([connected ? 1 : 0, buttons, lt, rt, lx, ly, rx, ry]);
+      rumble.push(g);
+    }
+    Atomics.add(i32, 1, 1);   // odd: writing
+    for (let p = 0; p < 4; p++) {
+      const o = p * PAD_BYTES, [connected, buttons, lt, rt, lx, ly, rx, ry] = out[p];
+      dv.setUint32(o, connected, true);
       dv.setUint16(o + 4, buttons, true);
       dv.setUint8(o + 6, lt); dv.setUint8(o + 7, rt);
       dv.setInt16(o + 8, lx, true); dv.setInt16(o + 10, ly, true);
       dv.setInt16(o + 12, rx, true); dv.setInt16(o + 14, ry, true);
-      // the game's rumble (XamInputSetState) to the gamepad
-      const vl = dv.getUint16(o + 16, true), vr = dv.getUint16(o + 18, true);
-      const act = g?.vibrationActuator as (GamepadHapticActuator & { playEffect?: Function }) | undefined;
+    }
+    Atomics.add(i32, 1, 1);   // even: done
+    // the game's rumble (XamInputSetState) to the gamepads
+    for (let p = 0; p < 4; p++) {
+      const o = p * PAD_BYTES, vl = dv.getUint16(o + 16, true), vr = dv.getUint16(o + 18, true);
+      const act = rumble[p]?.vibrationActuator as (GamepadHapticActuator & { playEffect?: Function }) | undefined;
       if (act?.playEffect && (vl || vr))
         act.playEffect('dual-rumble', { duration: 100, strongMagnitude: vl / 65535, weakMagnitude: vr / 65535 }).catch(() => {});
     }
-    Atomics.add(i32, 1, 1);   // even: done
 
     if (prompt) {
       const skippable = Atomics.load(i32, SKIPPABLE_AT >> 2) !== 0;
@@ -252,7 +263,7 @@ export function attachInput(memory: WebAssembly.Memory, block: number, log: (s: 
       if (b === blocked) return;
       blocked = b;
       if (b) keys.clear();
-      log(`[input] ${b ? 'buttons off for the game (waiting for the co-op host)' : 'buttons back on for the game'}`);
+      log(`[input] ${b ? 'buttons off for the game (waiting for the co-op host, or the co-op menu)' : 'buttons back on for the game'}`);
     },
     sendOptions(options: Record<string, string>) {
       const text = new TextEncoder().encode(Object.entries(options).map(([k, v]) => `${k}=${v}`).join('\n'));

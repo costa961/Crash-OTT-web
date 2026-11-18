@@ -114,7 +114,13 @@ namespace
             crashott_input_register(uint32_t(reinterpret_cast<uintptr_t>(&g_input)));
     }
 
-    // A consistent copy of pad `user` (the page never holds the block for long).
+    // The last consistent copy of each pad: what a read gets while the page is writing the block. The page writes
+    // from the browser's main thread, which can stop for milliseconds in the middle (a garbage collection, a
+    // layout): a read that gave up there said "not connected", and the game took it for an unplugged
+    // controller (the pause screen, online co-op's menu over the level on a client).
+    WebPad g_consistent[4];
+
+    // A consistent copy of pad `user`, or the last one while the page is writing.
     bool ReadPad(uint32_t user, WebPad& pad)
     {
         Register();
@@ -125,9 +131,13 @@ namespace
                 continue;
             memcpy(&pad, &g_input.pads[user], sizeof(pad));
             if (__atomic_load_n(&g_input.sequence, __ATOMIC_ACQUIRE) == before)
+            {
+                g_consistent[user] = pad;
                 return pad.connected != 0;
+            }
         }
-        return false;
+        pad = g_consistent[user];
+        return pad.connected != 0;
     }
 }
 

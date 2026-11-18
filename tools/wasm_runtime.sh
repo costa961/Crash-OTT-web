@@ -24,9 +24,14 @@ cp -r "$ROOT/third_party/crashott-pc/thirdparty/smaa" "$ROOT/third_party/crashot
 # current directory.
 (cd "$OUT/cpc-src" && git init -q && git apply --ignore-whitespace "$ROOT/patches/crashott-pc-web.patch") ||
   { echo "patches/crashott-pc-web.patch does not apply to third_party/crashott-pc"; exit 1; }
-# The online co-op's skin colour table (online/mp_colors.cpp): crashott-pc makes it from the extracted game data
-# (tools/mp_skin_colours.py); empty, the players' colours go on the fur only (as crashott-pc's own builds without it).
-echo "// empty: the skins get the fur test only (online/mp_colors.cpp)" > "$CPC/online/mp_skin_palettes.inc"
+# The online co-op's skin colour table (online/mp_colors.cpp), made from the game data by tools/skin_table.sh;
+# without it the players' colours go on the normal Crash's fur only and a player in a skin keeps its look.
+if [ -f "$OUT/mp_skin_palettes.inc" ]; then
+  cp "$OUT/mp_skin_palettes.inc" "$CPC/online/mp_skin_palettes.inc"
+else
+  echo "[wasm_runtime] no out/web/mp_skin_palettes.inc (tools/skin_table.sh): the co-op colours skip the skins"
+  echo "// empty: the skins get the fur test only (online/mp_colors.cpp)" > "$CPC/online/mp_skin_palettes.inc"
+fi
 
 # Guest layout (docs/ARCHITECTURE.md "Memory model"): guest address == linear memory address. The
 # runtime's data, stack and heap stay below RUNTIME_END (runtime/sbrk.c), where the guest never goes.
@@ -57,7 +62,9 @@ compile() { # kind path
   [ "$rel" = "xex_image/xex_image.cpp" ] && flags="$INC_XU -I$CPC"
   case "$src" in *.c) cc="$WASI/bin/clang -std=c17" ;; *) cc="$WASI/bin/clang++ -std=c++20 -fno-exceptions" ;; esac
   obj="$OUT/rt/${kind}_$(echo "$rel" | tr '/' '_').o"
-  local sum; sum="$( (cat "$src" "$ROOT"/runtime/compat/*.h "$GEN"/ppc_config.h "$GEN"/ppc_context.h 2>/dev/null; echo "$cc $COMMON $flags") | sha1sum | cut -c1-40)"
+  # (the sum covers the source, not its includes: the generated skin table is added for the file that includes it)
+  local extra=""; [ "$rel" = "online/mp_colors.cpp" ] && extra="$CPC/online/mp_skin_palettes.inc"
+  local sum; sum="$( (cat "$src" $extra "$ROOT"/runtime/compat/*.h "$GEN"/ppc_config.h "$GEN"/ppc_context.h 2>/dev/null; echo "$cc $COMMON $flags") | sha1sum | cut -c1-40)"
   if [ -z "${NOLINK:-}" ] && [ -f "$obj" ] && [ "$(cat "$obj.sum" 2>/dev/null)" = "$sum" ]; then return 0; fi
   if out=$($cc $COMMON $flags -Wno-unused-label -c -o "$obj" "$src" 2>&1); then
     echo "$sum" > "$obj.sum"

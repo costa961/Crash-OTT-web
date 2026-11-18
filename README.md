@@ -6,6 +6,12 @@ Crash of the Titans (Xbox 360) in the browser, built from **your own copy** of t
 > original 30 fps (or 60) in Chrome / Edge, with sound and controls. Some PC-only extras of crashott-pc are off, and
 > a few rendering paths are still simplified: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## 🏆 Achievements
+
+- Listed among the greatest game web ports in the
+  [Ultimate Catalog of Web Game Ports](https://github.com/Carter54git/Ultimate-Catalog-Of-Web-Game-Ports#c)
+  ("Greatest Games Web Ports"), under **C**: *Crash of the Titans (Crash-OTT-web; WebGPU)*.
+
 This repository contains no game code and no game files (only the few screenshots below). You supply your own legally obtained
 Xbox 360 disc image; a Docker build turns it into a browser module on your machine. What it produces is
 derived from your game: keep it for yourself, never publish it (a private server of your own, behind a login, is
@@ -21,11 +27,11 @@ Taken in Chrome from the author's own copy, with the 60 FPS mode and the FPS cou
 
 | | |
 |---|---|
-| ![The start page: Start, Online co-op, language, game data download, switches, Controls, Graphics, saves](docs/images/start-page.jpg) | ![The title screen at 60 fps](docs/images/title-screen.jpg) |
+| ![The start page: Play solo, Play online co-op, language, Crash's colour, game data, switches, Controls, Graphics, saves](docs/images/start-page.jpg) | ![The title screen at 60 fps](docs/images/title-screen.jpg) |
 | The start page | The title screen |
 | ![Episode 1's intro, with the page's "hold to skip" prompt](docs/images/episode-intro.jpg) | ![Crash in the first level at 60 fps](docs/images/gameplay.jpg) |
 | Episode 1's intro (hold to skip) | The first level |
-| ![The Online co-op dialog: the player's name, Host a session, the sessions on this server](docs/images/online-coop.jpg) | ![Two players in the first level in online co-op, the session's panel at the top right](docs/images/coop-gameplay.jpg) |
+| ![The Online co-op dialog: the player's name, Host a session, a session on this server to join](docs/images/online-coop.jpg) | ![Two players in the first level in online co-op, each Crash in its own colour, the session's panel at the top right](docs/images/coop-gameplay.jpg) |
 | Online co-op: host, or join a session | Two players in online co-op |
 
 ## Requirements
@@ -55,6 +61,9 @@ docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_recomp.sh
 # 5. Audio decoder (FFmpeg's WMA Pro, built from source; optional: without it the game is silent)
 docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/ffmpeg_wasm.sh
 
+# 5a. Online co-op colours on Crash's skins (optional: without it a player wearing a skin keeps its colours)
+docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src crashott-build bash tools/skin_table.sh
+
 # 5b. Runtime + link -> out/web/crashott.wasm
 docker run --rm -v "$PWD:/src" -w /src crashott-build bash tools/wasm_runtime.sh
 
@@ -75,7 +84,7 @@ docker run --rm -v "$PWD:/src" -v "$PWD/../crashott-game:/game:ro" -w /src -p 12
 On the start page:
 - **Language**: the six languages of the disc (the game's own voices and texts).
 - **Crash's colour**: his fur in another colour (blue, green, purple, crimson, pink, gold, teal, white, black),
-  in game and in the in-engine cutscenes; the videos keep the original. Picked before Start. In online co-op
+  in game and in the in-engine cutscenes; the videos keep the original. Picked before Play solo or Play online co-op. In online co-op
   it is your Crash's colour for everyone in the session (two players asking for the same one: the host gives
   the second one the next free colour).
 - **Download game data** (once, about 1.9 GB): the game files the game reads, into the browser's storage, for
@@ -103,7 +112,8 @@ and is untested there; Safari is untested.
 In game: **F2** opens the Graphics options over the game (the game pauses; changes apply when you close
 them, a new resolution included). **F** or a double-click toggles full screen (F11 works too); the picture is
 drawn at the window's (or the screen's) own resolution. Switching to another tab or minimizing
-the window pauses the game until you come back. **Hold B, Start or A** (keyboard: K, Esc, Space / Enter) for a
+the window pauses the game until you come back. **F8** reports a problem: a short note on what happened, marked in
+the log at that moment, and the log saved to a file to send (the game goes on meanwhile). **Hold B, Start or A** (keyboard: K, Esc, Space / Enter) for a
 moment to skip a cutscene or an intro video: a prompt at the bottom right fills while you hold.
 
 Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the keyboard as pad 1 (defaults):
@@ -125,12 +135,16 @@ Controls: a gamepad (the browser's "standard" mapping, an Xbox layout), or the k
   the keyboard, Controls > *the keyboard plays Player 2*. In game Player 2 presses **B** to join (riding in Crash's
   backpack; Y jumps off).
 - **Online co-op** (crashott-pc's online mode, each player in their own browser, through the server: the local one on
-  your network, or your private server for friends elsewhere): **Online co-op** on the start page. One player hosts
+  your network, or your private server for friends elsewhere): **Play online co-op** on the start page. One player hosts
   (*Host a session*) and plays as usual; a new game goes to the HUB, and every level the host starts takes the others
   with them. The others pick the host in *Sessions on this server* and wait at the main menu (their buttons are off
-  meanwhile) until the host starts a level. Join while the host is in the menus or at the HUB. Up to 4 players; only
+  meanwhile) until the host starts a level. Joining while the host is in a level (back after a drop, too) works:
+  you wait at the main menu and come in at the host's next level. Up to 4 players; only
   the host keeps a save; a panel at the top right shows the players and their ping, and a client's START opens a
-  small menu (Resume / Leave the session). It is crashott-pc's online mode, still a prototype there.
+  small menu (Resume / Leave the session). A knocked-out player gets up a few seconds later next to a teammate, but when every player
+  is down at the same time the team loses a life and starts again at the last checkpoint, as a death does in single
+  player; with no life left it is game over. A titan a player jacks is ridden on everyone's screen (and left there for
+  the others to jack when the rider gets off). It is crashott-pc's online mode, still a prototype there.
 
 Saves stay in the browser (its storage for this site; Export saves for a copy); the first start copies the
 saves an older build left on the local server (`out/userdata/content`).

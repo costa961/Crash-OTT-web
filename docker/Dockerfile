@@ -9,7 +9,7 @@
 #   uses them for VMX128.
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl xz-utils git bash coreutils make python3 \
+      ca-certificates curl xz-utils git bash coreutils make python3 python3-numpy python3-pil \
       clang lld cmake ninja-build && rm -rf /var/lib/apt/lists/*
 ARG WASI_VER=34
 RUN curl -fsSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VER}/wasi-sdk-${WASI_VER}.0-x86_64-linux.tar.gz" \

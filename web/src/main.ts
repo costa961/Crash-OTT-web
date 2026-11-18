@@ -57,7 +57,7 @@ setInterval(async () => {
     await w.close();
   } catch { /* no storage */ }
 }, 3000);
-(document.getElementById('logs') as HTMLButtonElement).onclick = async () => {
+async function downloadLog(name = 'crashott-log') {
   await logReady;
   const current = `${navigator.userAgent}\n${location.href}\n\n${lines.join('\n')}\n`;
   const text = previousLog
@@ -65,10 +65,11 @@ setInterval(async () => {
     : current;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  a.download = `crashott-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+  a.download = `${name}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-};
+}
+(document.getElementById('logs') as HTMLButtonElement).onclick = () => void downloadLog();
 
 // The language: remembered in this browser; the game reads it at start (CRASHOTT_LANGUAGE).
 const languageSel = document.getElementById('language') as HTMLSelectElement;
@@ -267,8 +268,10 @@ function toggleFullscreen() {
   if (document.fullscreenElement) void document.exitFullscreen();
   else void stageEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
 }
+/** A key typed into a field of the page's (the report's note): not one of the page's shortcuts. */
+const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement | null)?.closest?.('input, textarea, select');
 window.addEventListener('keydown', e => {
-  if (e.code === 'KeyF' && !e.repeat && !stageEl.hidden) { e.preventDefault(); toggleFullscreen(); }
+  if (e.code === 'KeyF' && !e.repeat && !stageEl.hidden && !typing(e)) { e.preventDefault(); toggleFullscreen(); }
 });
 stageEl.addEventListener('dblclick', toggleFullscreen);
 
@@ -495,6 +498,34 @@ graphicsDlg.addEventListener('close', () => {
   gameInput?.setPaused(false);
   canvas.focus?.();
 });
+// ---- F8 in game: report a problem (a mark with a note in the log, and the log saved to a file) ----
+// The game goes on (online co-op: the others play on); its keys stay off while the dialog is open.
+const reportDlg = document.getElementById('reportDlg') as HTMLDialogElement;
+const reportNote = document.getElementById('reportNote') as HTMLTextAreaElement;
+let reportOpen = false;
+let reportMarks = 0;
+window.addEventListener('keydown', e => {
+  if (e.code !== 'F8' || e.repeat || !gameInput || stageEl.hidden || reportOpen) return;
+  e.preventDefault();
+  reportOpen = true;
+  gameInput.setBlocked(true);
+  reportNote.value = '';
+  reportDlg.showModal();
+  reportNote.focus();
+});
+reportDlg.addEventListener('close', () => {
+  reportOpen = false;
+  gameInput?.setBlocked(false);
+  canvas.focus?.();
+});
+(document.getElementById('reportCancel') as HTMLButtonElement).onclick = () => reportDlg.close();
+(document.getElementById('reportSave') as HTMLButtonElement).onclick = () => {
+  const note = reportNote.value.trim().replace(/\s+/g, ' ');
+  log(`[report] ${++reportMarks} at ${new Date().toISOString()}: ${note || '(no note)'}`);
+  reportDlg.close();
+  void downloadLog('crashott-report');
+};
+
 (document.getElementById('gfxReset') as HTMLButtonElement).onclick = () => { showGraphics(GRAPHICS_DEFAULT); storeGraphics(); };
 (document.getElementById('gfxDone') as HTMLButtonElement).onclick = () => graphicsDlg.close();
 
@@ -678,12 +709,13 @@ async function drawHosts() {
     const label = document.createElement('div');
     label.textContent = h.name || 'PLAYER';
     const info = document.createElement('span');
-    info.textContent = ` ${h.players || 1}/${h.maxPlayers || 4} players${h.inGame ? ' · in a level' : ''}`;
+    info.textContent = ` ${h.players || 1}/${h.maxPlayers || 4} players${h.inGame ? ' · in a level (you come in at the next one)' : ''}`;
     label.append(info);
     const join = document.createElement('button');
     join.textContent = 'Join';
-    join.disabled = h.inGame || play.disabled;
-    join.title = h.inGame ? 'The host is in a level: join when it is back at the HUB' : '';
+    // during a level too: the player waits at the main menu and comes in at the host's next level
+    join.disabled = play.disabled;
+    join.title = h.inGame ? 'The host is in a level: you wait at the main menu and come in at its next level' : '';
     join.onclick = () => { coopDlg.close(); startGame({ role: 'join', name: playerName(), join: h.ip }); };
     row.append(label, join);
     mpList.append(row);
@@ -702,9 +734,51 @@ coopDlg.addEventListener('close', () => clearInterval(listTimer));
 function startMpPanel(net: GameNet, mp: MpChoice) {
   const panel = document.getElementById('mpPanel') as HTMLDivElement;
   const levelDlg = document.getElementById('mpLevelDlg') as HTMLDialogElement;
-  (document.getElementById('mpResume') as HTMLButtonElement).onclick = () => { net.command('resume'); levelDlg.close(); };
-  (document.getElementById('mpLeave') as HTMLButtonElement).onclick = () => { net.command('leave'); levelDlg.close(); };
-  levelDlg.addEventListener('cancel', () => net.command('resume'));
+  const resumeBtn = document.getElementById('mpResume') as HTMLButtonElement, leaveBtn = document.getElementById('mpLeave') as HTMLButtonElement;
+  // the runtime's status still says "menu open" for a moment after Resume / Leave: not opened again meanwhile
+  let closedAt = 0;
+  const closeLevelMenu = (command: string) => { net.command(command); closedAt = performance.now(); if (levelDlg.open) levelDlg.close(); };
+  resumeBtn.onclick = () => closeLevelMenu('resume');
+  leaveBtn.onclick = () => closeLevelMenu('leave');
+  levelDlg.addEventListener('cancel', e => { e.preventDefault(); closeLevelMenu('resume'); });
+  // The menu with the gamepad (it is the page's, not the game's): START or B resume, A presses the button that has
+  // the focus, the D-pad or the left stick goes from one button to the other. A button counts once it is let go
+  // and pressed again (the START that opened the menu is still held when it shows).
+  const pad = loadPadBindings(), keysBound = loadBindings();
+  // the keyboard's START / B (the player's keys) resume too; Esc is the dialog's own cancel
+  window.addEventListener('keydown', e => {
+    if (!levelDlg.open || e.repeat || e.code === 'Escape') return;
+    if (e.code === keysBound.start || e.code === keysBound.b) { e.preventDefault(); closeLevelMenu('resume'); }
+  });
+  let padHeld = new Set<string>(), padLoop = 0;
+  const padFrame = () => {
+    if (!levelDlg.open) { padLoop = 0; return; }
+    const g = (navigator.getGamepads?.() ?? []).find((p): p is Gamepad => !!p && p.connected);
+    const now = new Set<string>();
+    if (g) {
+      const b = (i: number) => !!g.buttons[i]?.pressed;
+      if (b(pad.start)) now.add('start');
+      if (b(pad.b)) now.add('b');
+      if (b(pad.a)) now.add('a');
+      if (b(pad.left) || (g.axes[0] ?? 0) < -0.5) now.add('left');
+      if (b(pad.right) || (g.axes[0] ?? 0) > 0.5) now.add('right');
+    }
+    const pressed = (k: string) => now.has(k) && !padHeld.has(k);
+    if (pressed('start') || pressed('b')) closeLevelMenu('resume');
+    else if (pressed('a')) (document.activeElement === leaveBtn ? leaveBtn : resumeBtn).click();
+    else if (pressed('left')) leaveBtn.focus();
+    else if (pressed('right')) resumeBtn.focus();
+    padHeld = now;
+    padLoop = requestAnimationFrame(padFrame);
+  };
+  const openLevelMenu = () => {
+    levelDlg.showModal();
+    resumeBtn.focus();
+    gameInput?.setBlocked(true);
+    // what is held as it opens (the START that opened it) counts only once let go
+    padHeld = new Set(['start', 'b', 'a', 'left', 'right']);
+    if (!padLoop) padLoop = requestAnimationFrame(padFrame);
+  };
   // tests (out/coop.mjs): a command to the session from the console
   (window as unknown as { mpCommand?: (t: string) => void }).mpCommand = t => net.command(t);
   panel.hidden = false;
@@ -720,14 +794,16 @@ function startMpPanel(net: GameNet, mp: MpChoice) {
     const head = { hosting: 'Hosting', joining: 'Joining...', joined: 'Joined', failed: 'Not connected', off: 'Session closed', searching: 'Searching...' }[s.state] ?? s.state;
     const lines: string[] = [`<b>Online co-op</b> · ${head}`];
     if (s.state === 'failed' || s.state === 'off') lines.push(s.reason || 'The session ended.');
-    for (const p of players) lines.push(`${p.me ? '<span class="me">' : ''}P${p.slot + 1} ${escapeHtml(p.name)}${p.me ? ' (you)</span>' : ` · ${p.ping} ms`}`);
+    // out of the session: its last roster no more (it listed players who were gone)
+    if (s.state !== 'failed' && s.state !== 'off') for (const p of players) lines.push(`${p.me ? '<span class="me">' : ''}P${p.slot + 1} ${escapeHtml(p.name)}${p.me ? ' (you)</span>' : ` · ${p.ping} ms`}`);
     if (s.state === 'joined' && !s.clientInLevel) lines.push(s.inGame ? 'The host is in a level: you follow it into the next one.' : 'Waiting for the host to start a level...');
-    if (s.state === 'hosting' && players.length < 2) lines.push('Waiting for players (Online co-op on their start page).');
+    if (s.state === 'hosting' && players.length < 2) lines.push('Waiting for players (Play online co-op on their start page).');
     panel.innerHTML = lines.join('<br>');
-    // a client waiting for the host's level stays at the main menu (the level start is taken there)
-    gameInput?.setBlocked(s.state === 'joined' && !s.clientInLevel);
-    if (s.levelMenu && !levelDlg.open) levelDlg.showModal();
+    // a client waiting for the host's level stays at the main menu (the level start is taken there); its menu over a
+    // level takes the gamepad (the game sees nothing pressed meanwhile, as crashott-pc's own menu does)
+    if (s.levelMenu && !levelDlg.open && performance.now() - closedAt > 1500) openLevelMenu();
     else if (!s.levelMenu && levelDlg.open) levelDlg.close();
+    gameInput?.setBlocked((s.state === 'joined' && !s.clientInLevel) || levelDlg.open || reportOpen);
   }, 500);
 }
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
