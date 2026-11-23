@@ -264,7 +264,7 @@ index d9eac6f..7fe6bf1 100644
          }
  
 diff --git a/runtime/online/mp_net.cpp b/runtime/online/mp_net.cpp
-index 180b3dc..a8a9db5 100644
+index 180b3dc..4d27f15 100644
 --- a/runtime/online/mp_net.cpp
 +++ b/runtime/online/mp_net.cpp
 @@ -64,6 +64,21 @@
@@ -334,7 +334,7 @@ index 180b3dc..a8a9db5 100644
      // magic, slot, sequence, the pad, camera forward (x, z), the player's position (x, y, z), in play
      constexpr size_t PAD_PACKET = 12 + 12 + 8 + 12 + 4;
      constexpr uint32_t GAME_DATABASE = 0x824A76A4;  // CGameDatabase: players at +16 / +20
-@@ -241,6 +287,21 @@ namespace
+@@ -241,6 +287,22 @@ namespace
          // 160 units away for a moment (a player "born" far ahead).
          uint64_t quietUntil = 0;
          uint64_t remotePadAt[mp::MAX_PLAYERS]{}, padSequence[mp::MAX_PLAYERS]{}, padPackets = 0;
@@ -346,7 +346,8 @@ index 180b3dc..a8a9db5 100644
 +        uint64_t jackPressHitAt[mp::MAX_PLAYERS]{};  // getting on: when its copy hit the titan (0 = not yet)
 +        // Each remote player's ride as its machine says (the titan's name, 0 = on foot), its copy's jacking behaviour
 +        // here (RemotePad: no B of its own while it rides) and since when the copy rides what its machine does not.
-+        uint64_t remoteRides[mp::MAX_PLAYERS]{}, copyAloneSince[mp::MAX_PLAYERS]{};
++        // Since when a copy is on foot here while its machine rides (ReconcileJacks starts that ride again).
++        uint64_t remoteRides[mp::MAX_PLAYERS]{}, copyAloneSince[mp::MAX_PLAYERS]{}, copyMissingSince[mp::MAX_PLAYERS]{};
 +        uint32_t copyJacking[mp::MAX_PLAYERS]{};
 +        // A copy next to a titan (JACK_B_NEAR): no B of its own, it gets on when its machine says (RemotePad). The
 +        // titans here, looked up again every TITANS_EVERY_MS.
@@ -356,7 +357,7 @@ index 180b3dc..a8a9db5 100644
          XINPUT_GAMEPAD lastSentPad{};
          uint64_t lastPadSend = 0, sentPadSequence = 0;
          float snap = 1.0f;  // a remote player's position error corrected through the physics
-@@ -295,6 +356,27 @@ namespace
+@@ -295,6 +357,27 @@ namespace
          std::vector<Stage> stages;
          std::deque<uint32_t> stagesDone;
          uint64_t hitsApplied = 0, copyHitsDropped = 0;
@@ -384,7 +385,7 @@ index 180b3dc..a8a9db5 100644
      };
  
      uint32_t Get32(const uint8_t* p);
-@@ -485,7 +567,26 @@ namespace
+@@ -485,7 +568,26 @@ namespace
          StoreBE32(guest, bits);
      }
  
@@ -412,7 +413,7 @@ index 180b3dc..a8a9db5 100644
  
      // Every actor the stream manager holds: the global room and each room.
      std::vector<uint32_t> Actors()
-@@ -547,7 +648,12 @@ namespace
+@@ -547,7 +649,12 @@ namespace
      // A hit that came from another machine, the way the game's hit handler ends one (ApplyEnemyHit,
      // sub_82113470): the hitpoints, then at 0 the damage result (kind 4) to the actor. A breakable takes it as
      // its next stage (BreakableBase, sub_8214FF10: the stump of a small mojo plant; a big one only drops mojo,
@@ -426,7 +427,7 @@ index 180b3dc..a8a9db5 100644
      void LandHit(PPCContext& ctx, uint8_t* base, uint32_t damageable, double delta, uint32_t damager)
      {
          PPCContext call = ctx;
-@@ -559,6 +665,8 @@ namespace
+@@ -559,6 +666,8 @@ namespace
          static uint32_t message = GuestAlloc(128);
          if (!message || !GuestPointer(actor) || LoadF(LoadBE32(damageable + DAMAGEABLE_HITPOINTS)) > 0)
              return;
@@ -435,7 +436,7 @@ index 180b3dc..a8a9db5 100644
          call = ctx;
          call.r3.u64 = message;
          call.r4.u64 = 4;
-@@ -977,6 +1085,394 @@ namespace
+@@ -977,6 +1086,500 @@ namespace
              n.hits.push_back(hit);
      }
  
@@ -486,13 +487,19 @@ index 180b3dc..a8a9db5 100644
 +        return jacking ? JackSlot(jacking, JACKING_SLOT_B) : 0;
 +    }
 +
++    // The player (local index) who rides this actor here, other than `except`; -1 if none.
++    int RiderOf(uint32_t actor, int except = -1)
++    {
++        for (uint32_t i = 0; actor && i < mp::MAX_PLAYERS; ++i)
++            if (int(i) != except && RiddenTitan(i) == actor)
++                return int(i);
++        return -1;
++    }
++
 +    // Whether some player rides this actor here.
 +    bool Ridden(uint32_t actor)
 +    {
-+        for (uint32_t i = 0; actor && i < mp::MAX_PLAYERS; ++i)
-+            if (RiddenTitan(i) == actor)
-+                return true;
-+        return false;
++        return RiderOf(actor) >= 0;
 +    }
 +
 +    // The titan (an actor with a jacking behaviour, not a player) nearest to a place, nobody riding it, within
@@ -581,6 +588,23 @@ index 180b3dc..a8a9db5 100644
 +        call.r5.u64 = JackSlot(jacking, JACKING_SLOT_B);
 +        call.r6.u64 = 1;
 +        __imp__sub_82120D40(call, base);
++    }
++
++    // Two players on one titan (their jacks crossed on the way: each machine let its own player on): the lower slot
++    // keeps it, on every machine. The other gets off here; this machine's own player also tells the others (EndJack
++    // is the native call: the hook does not send it).
++    void YieldTitan(PPCContext& ctx, uint8_t* base, Net& n, uint32_t index, uint32_t titan, uint32_t keeperSlot)
++    {
++        uint32_t jacking = FindJacking(PlayerActor(index));
++        if (!jacking || JackSlot(jacking, JACKING_SLOT_B) != titan)
++            return;
++        uint32_t slot = SlotOf(n.slot, index);
++        n.jackPressUntil[slot] = 0;
++        EndJack(ctx, base, jacking);
++        Log("[mp] jack: player %u (slot %u) gets off %08X here: slot %u rides it", index + 1, slot + 1,
++            uint32_t(NameOf(titan)), keeperSlot + 1);
++        if (index == 0)
++            SendJack(n, JACK_END, titan);
 +    }
 +
 +    // Stuns a titan here as another machine did (its own stamina function: the hook does not send it back).
@@ -679,6 +703,17 @@ index 180b3dc..a8a9db5 100644
 +            uint32_t ridden = JackSlot(jacking, JACKING_SLOT_B);
 +            if (jack.kind == JACK_END)
 +            {
++                // Its machine went from one titan straight to another (the end and the next start in one frame): once
++                // the copy is on the one its machine rides now, this end is of the last one. Applied to the ride it
++                // has, it put the copy off the new titan (forced, JACK_NATURAL_MS later) for good.
++                if (ridden && NameOf(ridden) == n.remoteRides[jack.slot])
++                {
++                    if (jack.pressing && n.jackPressMode[jack.slot] == PRESS_OFF)
++                        n.jackPressUntil[jack.slot] = 0;
++                    Log("[mp] jack: player %u (slot %u) leaves %08X here: already on %08X", index + 1, jack.slot + 1,
++                        uint32_t(jack.titan), uint32_t(NameOf(ridden)));
++                    continue;
++                }
 +                // Off as the game gets off (its copy's B: Crash's backflip off, the titan's own state); forced late.
 +                if (ridden && !jack.pressing)
 +                {
@@ -706,6 +741,29 @@ index 180b3dc..a8a9db5 100644
 +                Log("[mp] jack: player %u (slot %u) rides %08X here (%s)", index + 1, jack.slot + 1, uint32_t(jack.titan),
 +                    jack.pressing ? "its copy jacked it" : "by itself");
 +                continue;
++            }
++            // Its machine has since got off it, or onto another: this start is old (its copy still on the way).
++            if (n.remoteRides[jack.slot] != jack.titan)
++            {
++                if (jack.pressing && n.jackPressMode[jack.slot] == PRESS_ON && n.jackPressTitan[jack.slot] == titan)
++                    n.jackPressUntil[jack.slot] = 0;
++                Log("[mp] jack: player %u (slot %u) rides %08X here: dropped, its machine is %s", index + 1,
++                    jack.slot + 1, uint32_t(jack.titan), n.remoteRides[jack.slot] ? "on another titan" : "off it");
++                continue;
++            }
++            // Somebody else rides it here (the jacks crossed): the lower slot keeps it (YieldTitan).
++            if (int rider = RiderOf(titan, int(index)); rider >= 0)
++            {
++                uint32_t riderSlot = SlotOf(n.slot, uint32_t(rider));
++                if (riderSlot < jack.slot)
++                {
++                    if (jack.pressing && n.jackPressMode[jack.slot] == PRESS_ON && n.jackPressTitan[jack.slot] == titan)
++                        n.jackPressUntil[jack.slot] = 0;
++                    Log("[mp] jack: player %u (slot %u) rides %08X here: dropped, slot %u rides it (its machine puts it off)",
++                        index + 1, jack.slot + 1, uint32_t(jack.titan), riderSlot + 1);
++                    continue;
++                }
++                YieldTitan(ctx, base, n, uint32_t(rider), titan, jack.slot);
 +            }
 +            StunTitan(ctx, base, n, titan);
 +            if (!jack.pressing && !ridden)
@@ -748,7 +806,7 @@ index 180b3dc..a8a9db5 100644
 +
 +    // A copy that rides here what its machine does not say (its own B on a titan stunned here only, a lost
 +    // packet): after JACK_ALONE_MS it gets off (B), and is put off JACK_NATURAL_MS later if it still rides.
-+    constexpr uint64_t JACK_ALONE_MS = 8000;
++    constexpr uint64_t JACK_ALONE_MS = 8000, JACK_MISSING_MS = 3000;
 +    constexpr float JACK_B_NEAR = 6.0f;
 +    constexpr uint64_t TITANS_EVERY_MS = 500;
 +    void ReconcileJacks(PPCContext& ctx, uint8_t* base, Net& n)
@@ -761,6 +819,26 @@ index 180b3dc..a8a9db5 100644
 +            for (uint32_t actor : Actors())
 +                if (PlayerIndexOf(actor) < 0 && FindJacking(actor))
 +                    n.titans.push_back(actor);
++        }
++        // Two players on one titan here, or this machine's player on a titan a lower slot's machine rides (its copy
++        // maybe not on it here yet): the lower slot keeps it (ApplyJacks drops the others' starts the same way).
++        for (uint32_t index = 0; index < n.players && index < mp::MAX_PLAYERS; ++index)
++        {
++            uint32_t titan = RiddenTitan(index);
++            if (!titan)
++                continue;
++            uint32_t slot = SlotOf(n.slot, index), keeper = slot;
++            if (int other = RiderOf(titan, int(index)); other >= 0)
++                keeper = std::min(keeper, SlotOf(n.slot, uint32_t(other)));
++            if (index == 0)
++                for (uint32_t s = 0; s < keeper; ++s)
++                    if (n.remoteRides[s] && n.remoteRides[s] == NameOf(titan))
++                    {
++                        keeper = s;
++                        break;
++                    }
++            if (keeper < slot)
++                YieldTitan(ctx, base, n, index, titan, keeper);
 +        }
 +        for (uint32_t index = 1; index < n.players && index < mp::MAX_PLAYERS; ++index)
 +        {
@@ -783,6 +861,35 @@ index 180b3dc..a8a9db5 100644
 +            n.copyNearTitan[slot] = near;
 +            bool pending = now < n.jackPressUntil[slot] ||
 +                std::any_of(n.jacks.begin(), n.jacks.end(), [slot](const Net::Jack& j) { return j.slot == slot && j.kind != JACK_STUN; });
++            // On foot here while its machine rides (thrown off here, a start that came to nothing): after
++            // JACK_MISSING_MS its machine's start is made again, on that titan if it is here and nobody rides it.
++            if (!rides && n.remoteRides[slot] && !pending && now >= n.quietUntil && !cutscenes::CutscenePlaying())
++            {
++                if (!n.copyMissingSince[slot])
++                    n.copyMissingSince[slot] = now;
++                else if (now - n.copyMissingSince[slot] >= JACK_MISSING_MS)
++                {
++                    n.copyMissingSince[slot] = 0;
++                    for (uint32_t titan : n.titans)
++                    {
++                        uint32_t tx = LoadBE32(titan + 44);
++                        if (NameOf(titan) != n.remoteRides[slot] || !GuestPointer(tx) || !FindJacking(titan) || Ridden(titan))
++                            continue;
++                        Net::Jack jack;
++                        jack.slot = slot;
++                        jack.kind = JACK_START;
++                        jack.titan = n.remoteRides[slot];
++                        jack.pos[0] = LoadF(tx + 48), jack.pos[1] = LoadF(tx + 52), jack.pos[2] = LoadF(tx + 56);
++                        jack.at = now;
++                        n.jacks.push_back(jack);
++                        Log("[mp] jack: player %u (slot %u) on foot here, its machine rides %08X: on it again", index + 1,
++                            slot + 1, uint32_t(jack.titan));
++                        break;
++                    }
++                }
++            }
++            else
++                n.copyMissingSince[slot] = 0;
 +            if (!rides || NameOf(rides) == n.remoteRides[slot] || pending)
 +            {
 +                if (!rides || NameOf(rides) == n.remoteRides[slot])
@@ -830,7 +937,7 @@ index 180b3dc..a8a9db5 100644
      void HostReceive(Net& n)
      {
          uint8_t buffer[256];
-@@ -988,6 +1484,8 @@ namespace
+@@ -988,6 +1591,8 @@ namespace
                  break;
              if (got >= 4 && Get32(buffer) == HIT_MAGIC)
                  ReceiveHit(n, buffer, got, from);
@@ -839,7 +946,7 @@ index 180b3dc..a8a9db5 100644
              else
                  ReceivePad(n, buffer, got, from);
          }
-@@ -1135,6 +1633,15 @@ namespace
+@@ -1135,6 +1740,15 @@ namespace
          ApplyHits(ctx, base, n);
          HostTestTeleport(ctx, base);
          uint64_t now = mp::NowMs();
@@ -855,7 +962,7 @@ index 180b3dc..a8a9db5 100644
          n.frames++;
          if (now - n.lastSend < uint64_t(1000 / n.hz))
              return;
-@@ -1242,6 +1749,21 @@ namespace
+@@ -1242,6 +1856,21 @@ namespace
                  n.stages.push_back(stage);
                  continue;
              }
@@ -877,7 +984,7 @@ index 180b3dc..a8a9db5 100644
              if (got < int(HEADER) || Get32(buffer) != MAGIC)
              {
                  ReceivePad(n, buffer, got, from);
-@@ -1357,7 +1879,9 @@ namespace
+@@ -1357,7 +1986,9 @@ namespace
                      ApplyHitpoints(ctx, base, n, it->second, r, name, true);
                  continue;
              }
@@ -888,7 +995,7 @@ index 180b3dc..a8a9db5 100644
              {
                  // How far this machine's own update had taken it from the host's place (stats).
                  // The transform alone only moved the picture: the client's own physics kept the character where its
-@@ -1591,7 +2115,8 @@ namespace mp
+@@ -1591,7 +2222,8 @@ namespace mp
      // that (or `snap`, if larger), or standing still for 1.5 s still more than 0.6 off (a wall, another
      // player in the way). At most every 250 ms per player; a correction that does not hold (the place is
      // taken here, or the player slides off it) is tried 3 times, then left until the owner moves.
@@ -898,7 +1005,7 @@ index 180b3dc..a8a9db5 100644
      void CorrectRemotePlayers(PPCContext& ctx, uint8_t* base, Net& n)
      {
          uint64_t now = mp::NowMs();
-@@ -1612,6 +2137,14 @@ namespace mp
+@@ -1612,6 +2244,14 @@ namespace mp
              uint32_t actor = index ? PlayerActor(index) : 0, xform = actor ? LoadBE32(actor + 44) : 0;
              if (!GuestPointer(xform) || !inPlay || !at || now - at > 1000 || !mp::PlayerOnFoot(index) || mp::HitpointsHeld(index))
                  continue;
@@ -913,7 +1020,7 @@ index 180b3dc..a8a9db5 100644
              float* last = n.lastRecordPos[index];
              if (std::abs(last[0] - want[0]) + std::abs(last[1] - want[1]) + std::abs(last[2] - want[2]) > 0.05f)
              {
-@@ -1635,7 +2168,9 @@ namespace mp
+@@ -1635,7 +2275,9 @@ namespace mp
              n.lastSnap[index] = now;
              n.snapRepeats[index] = same ? n.snapRepeats[index] + 1 : 1;
              memcpy(prev, want, sizeof(want));
@@ -924,7 +1031,7 @@ index 180b3dc..a8a9db5 100644
              {
                  n.teleports++;
                  if (mp::Trace())
-@@ -1662,6 +2197,9 @@ namespace mp
+@@ -1662,6 +2304,9 @@ namespace mp
          float distance = 0;
          if (inPlay)
          {
@@ -934,7 +1041,7 @@ index 180b3dc..a8a9db5 100644
              pos[0] = LoadF(xf + 48), pos[1] = LoadF(xf + 52), pos[2] = LoadF(xf + 56);
              if (leash > 0 && OthersCentre(n, 0, cx, cz))
              {
-@@ -1795,11 +2333,20 @@ namespace mp
+@@ -1795,11 +2440,20 @@ namespace mp
          Net& n = N();
          // Players 2-8 are shown on foot at the start (mp_players.cpp): controller `user` stays plugged in,
          // on the pad of the slot it plays; a player that went quiet leaves its Crash standing.
@@ -956,7 +1063,7 @@ index 180b3dc..a8a9db5 100644
          // A menu over the level here (this machine's pause, a tutorial): the frontend takes any controller's
          // buttons, so the remote players' stay off it (their Crashes stand until it closes).
          if (input::pc::InMenus())
-@@ -1808,6 +2355,69 @@ namespace mp
+@@ -1808,6 +2462,69 @@ namespace mp
              std::lock_guard<std::mutex> lock(n.padMutex);
              if (n.remotePadAt[slot] && NowMs() - n.remotePadAt[slot] <= 2000)
                  memcpy(pad, &n.remotePad[slot], sizeof(XINPUT_GAMEPAD));
@@ -1026,7 +1133,7 @@ index 180b3dc..a8a9db5 100644
              // The left stick as the sender meant it in the world: from its camera's axes to this one's.
              float fx = n.remoteForward[slot][0], fz = n.remoteForward[slot][1], gx = 0, gz = 0;
              bool camera = CameraForward(gx, gz);
-@@ -1896,6 +2506,15 @@ namespace mp
+@@ -1896,6 +2613,16 @@ namespace mp
          n.damageables.clear();
          n.physics.clear();
          n.characterSnapAt.clear();
@@ -1034,6 +1141,7 @@ index 180b3dc..a8a9db5 100644
 +        g_renamed.clear();
 +        memset(n.remoteRides, 0, sizeof(n.remoteRides));
 +        memset(n.copyAloneSince, 0, sizeof(n.copyAloneSince));
++        memset(n.copyMissingSince, 0, sizeof(n.copyMissingSince));
 +        memset(n.copyJacking, 0, sizeof(n.copyJacking));
 +        memset(n.copyNearTitan, 0, sizeof(n.copyNearTitan));
 +        n.titans.clear();
@@ -1042,7 +1150,7 @@ index 180b3dc..a8a9db5 100644
          n.lastSequence = 0;
          memset(n.lookDone, 0, sizeof(n.lookDone));
          memset(n.interests, 0, sizeof(n.interests));
-@@ -1929,7 +2548,38 @@ namespace mp
+@@ -1929,7 +2656,38 @@ namespace mp
          if (n.role == Role::Host)
              HostTick(ctx, base, n);
          else if (n.role == Role::Client)
@@ -1081,7 +1189,7 @@ index 180b3dc..a8a9db5 100644
      }
  }
  
-@@ -1941,6 +2591,35 @@ PPC_FUNC(sub_82092668)
+@@ -1941,6 +2699,35 @@ PPC_FUNC(sub_82092668)
          ClientApply(ctx, base, N());
  }
  
@@ -1117,7 +1225,7 @@ index 180b3dc..a8a9db5 100644
  // CAIManager::vf10 / CObjectiveManager::vf10: skipped on a client with CRASH_MP_SUPPRESS, once its
  // level is up (player 1 spawned by the level's own objectives, the host already sending).
  static bool ClientSuppresses(bool what)
-@@ -2024,6 +2703,13 @@ namespace mp::net
+@@ -2024,6 +2811,13 @@ namespace mp::net
          n.players = std::clamp<uint32_t>(players, 1, MAX_PLAYERS);
          if (n.role != ::Role::Host)
              memset(n.lobbyClient, 0, sizeof(n.lobbyClient));
